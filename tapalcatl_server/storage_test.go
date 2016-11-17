@@ -6,7 +6,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/tilezen/tapalcatl"
+	"strconv"
 	"testing"
+	"time"
 )
 
 type mockS3 struct {
@@ -22,10 +24,14 @@ func (m *mockS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
 		etag := new(string)
 		*etag = "1234"
 
+		last_mod := new(time.Time)
+		*last_mod = time.Date(2016, time.November, 17, 12, 27, 0, 0, time.UTC)
+
 		obj := &s3.GetObjectOutput{
 			Body: &emptyReadCloser{},
 			ContentLength: length,
 			ETag: etag,
+			LastModified: last_mod,
 		}
 		return obj, nil
 
@@ -79,8 +85,25 @@ func TestS3Storage(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("Expected 200 OK response from empty storage, but got %d", resp.StatusCode)
 	}
+	// check string header
 	etag := resp.Header.Get("ETag")
 	if etag != "1234" {
 		t.Fatalf("Expected ETag to be \"1234\", but got %#v", etag)
+	}
+	// should be formatted in RFC 822 / 1123 format
+	last_mod := resp.Header.Get("Last-Modified")
+	exp_last_mod := "Thu, 17 Nov 2016 12:27:00 UTC"
+	if last_mod != exp_last_mod {
+		t.Fatalf("Expected Last-Modified to be %#v, but got %#v", exp_last_mod, last_mod)
+	}
+	// check integer header
+	content_length_hdr := resp.Header.Get("Content-Length")
+	content_length, err := strconv.ParseInt(content_length_hdr, 10, 64)
+	if err != nil {
+		t.Fatalf("Unable to parse Content-Length header %#v as int: %s", content_length_hdr, err.Error())
+	}
+	var exp_content_length int64 = 0
+	if content_length != exp_content_length {
+		t.Fatalf("Expected Content-Length to be %d, but was %d.", exp_content_length, content_length)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type S3Storage struct {
@@ -87,6 +88,10 @@ func getHeader(m reflect.Value, f reflect.StructField) (key, value string, ok bo
 	switch val := m.Interface().(type) {
 	case string:
 		value = val
+	case time.Time:
+		value = val.Format(time.RFC1123)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr:
+		value = fmt.Sprintf("%d", val)
 	default:
 		ok = false
 	}
