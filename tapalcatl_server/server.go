@@ -6,6 +6,7 @@ import (
 	"github.com/NYTimes/gziphandler"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
 	"github.com/tilezen/tapalcatl"
@@ -190,7 +191,7 @@ func main() {
 	}
 	r.HandleFunc("/debug/vars", expvar_func).Methods("GET")
 
-	http.Handle("/", r)
+	http.Handle("/", handlers.CombinedLoggingHandler(os.Stdout, handlers.CORS()(r)))
 
 	log.Fatal(http.ListenAndServe(listen, r))
 }
