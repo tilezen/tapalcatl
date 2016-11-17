@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 )
 
 func getHealth(rw http.ResponseWriter, _ *http.Request) {
@@ -23,11 +24,11 @@ func getHealth(rw http.ResponseWriter, _ *http.Request) {
 }
 
 type patternConfig struct {
-	Bucket string
-	KeyPattern string
-	Prefix string
-	Layer string
-	ProxyURL url.URL
+	Bucket       string
+	KeyPattern   string
+	Prefix       string
+	Layer        string
+	ProxyURL     url.URL
 	MetatileSize int
 }
 
@@ -63,12 +64,35 @@ func (m *mimeMapOption) Set(line string) error {
 	return nil
 }
 
+// try and parse a range of different date formats which are allowed by HTTP.
+func parseHTTPDates(date string) (*time.Time, error) {
+	time_layouts := []string{
+		time.RFC1123, time.RFC1123Z,
+		time.RFC822, time.RFC822Z,
+		time.RFC850, time.ANSIC,
+	}
+
+	var err error
+	var ts time.Time
+
+	for _, layout := range time_layouts {
+		ts, err = time.Parse(layout, date)
+		if err == nil {
+			return &ts, nil
+		}
+	}
+
+	// give the error for our preferred format
+	_, err = time.Parse(time.RFC1123, date)
+	return nil, err
+}
+
 // MuxParser parses the tile coordinate from the captured arguments from
 // the gorilla mux router.
 type MuxParser struct{}
 
 // Parse ignores its argument and uses values from the capture.
-func (_ *MuxParser) Parse(req *http.Request) (t tapalcatl.TileCoord, err error) {
+func (_ *MuxParser) Parse(req *http.Request) (t tapalcatl.TileCoord, c Condition, err error) {
 	m := mux.Vars(req)
 
 	t.Z, err = strconv.Atoi(m["z"])
@@ -87,6 +111,20 @@ func (_ *MuxParser) Parse(req *http.Request) (t tapalcatl.TileCoord, err error) 
 	}
 
 	t.Format = m["fmt"]
+
+	if_modified_since := req.Header.Get("If-Modified-Since")
+	if if_modified_since != "" {
+		c.IfModifiedSince, err = parseHTTPDates(if_modified_since)
+		if err != nil {
+			return
+		}
+	}
+
+	if_none_match := req.Header.Get("If-None-Match")
+	if if_none_match != "" {
+		c.IfNoneMatch = &if_none_match
+	}
+
 	return
 }
 

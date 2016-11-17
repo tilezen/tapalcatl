@@ -32,15 +32,15 @@ type fakeParser struct {
 	tile tapalcatl.TileCoord
 }
 
-func (f *fakeParser) Parse(_ *http.Request) (tapalcatl.TileCoord, error) {
-	return f.tile, nil
+func (f *fakeParser) Parse(_ *http.Request) (tapalcatl.TileCoord, Condition, error) {
+	return f.tile, Condition{}, nil
 }
 
 type fakeStorage struct {
 	storage map[tapalcatl.TileCoord]*Response
 }
 
-func (f *fakeStorage) Get(t tapalcatl.TileCoord) (*Response, error) {
+func (f *fakeStorage) Get(t tapalcatl.TileCoord, _ Condition) (*Response, error) {
 	resp, ok := f.storage[t]
 	if ok {
 		return resp, nil

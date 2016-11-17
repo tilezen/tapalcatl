@@ -50,7 +50,7 @@ func TestS3StorageEmpty(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer)
 
-	resp, err := storage.Get(tapalcatl.TileCoord{0, 0, 0, "zip"})
+	resp, err := storage.Get(tapalcatl.TileCoord{0, 0, 0, "zip"}, Condition{})
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
@@ -78,7 +78,7 @@ func TestS3Storage(t *testing.T) {
 		t.Fatalf("Unexpected key calculation. Expected %#v, got %#v.", api.expectedKey, key)
 	}
 
-	resp, err := storage.Get(tile)
+	resp, err := storage.Get(tile, Condition{})
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}

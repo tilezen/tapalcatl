@@ -9,7 +9,7 @@ import (
 )
 
 type Parser interface {
-	Parse(*http.Request) (tapalcatl.TileCoord, error)
+	Parse(*http.Request) (tapalcatl.TileCoord, Condition, error)
 }
 
 func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Getter, proxy http.Handler) http.Handler {
@@ -20,7 +20,7 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 			updateCounters(time.Since(start_time))
 		}()
 
-		coord, err := p.Parse(req)
+		coord, cond, err := p.Parse(req)
 		if err != nil {
 			parseErrors.Add(1)
 			http.Error(rw, err.Error(), http.StatusBadRequest)
@@ -29,7 +29,7 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 
 		meta_coord, offset := coord.MetaAndOffset(metatile_size)
 
-		resp, err := storage.Get(meta_coord)
+		resp, err := storage.Get(meta_coord, cond)
 		if err != nil || resp.StatusCode == 404 {
 			proxiedRequests.Add(1)
 			proxy.ServeHTTP(rw, req)

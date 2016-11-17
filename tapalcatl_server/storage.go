@@ -113,13 +113,15 @@ func setHeaders(h http.Header, params interface{}) {
 	}
 }
 
-func (s *S3Storage) Get(t tapalcatl.TileCoord) (*Response, error) {
+func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error) {
 	key, err := s.objectKey(t)
 	if err != nil {
 		return nil, err
 	}
 
 	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &key}
+	input.IfModifiedSince = c.IfModifiedSince
+	input.IfNoneMatch = c.IfNoneMatch
 
 	output, err := s.client.GetObject(input)
 	if err != nil {
