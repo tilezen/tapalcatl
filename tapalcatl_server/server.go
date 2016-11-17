@@ -194,7 +194,7 @@ func main() {
 			BufferPool: bufferPool,
 		}
 
-		h := MetatileHandler(parser, cfg.MetatileSize, mime_map.mimes, storage, proxy)
+		h := MetatileHandler(parser, cfg.MetatileSize, mime_map.mimes, storage, proxy, logger)
 		gzipped := gziphandler.GzipHandler(h)
 
 		r.Handle(pattern, gzipped).Methods("GET")

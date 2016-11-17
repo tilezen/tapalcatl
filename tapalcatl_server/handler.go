@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"github.com/tilezen/tapalcatl"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -12,7 +13,7 @@ type Parser interface {
 	Parse(*http.Request) (tapalcatl.TileCoord, Condition, error)
 }
 
-func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Getter, proxy http.Handler) http.Handler {
+func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Getter, proxy http.Handler, logger *log.Logger) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		numRequests.Add(1)
 		start_time := time.Now()
@@ -23,6 +24,7 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 		coord, cond, err := p.Parse(req)
 		if err != nil {
 			parseErrors.Add(1)
+			logger.Printf("WARNING: Failed to parse request: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -30,6 +32,9 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 		meta_coord, offset := coord.MetaAndOffset(metatile_size)
 
 		resp, err := storage.Get(meta_coord, cond)
+		if err != nil {
+			logger.Printf("WARNING: Failed fetch metatile from storage: %s", err.Error())
+		}
 		if err != nil || resp.StatusCode == 404 {
 			proxiedRequests.Add(1)
 			proxy.ServeHTTP(rw, req)
@@ -41,6 +46,7 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 		body_size, err := io.Copy(&buf, resp.Body)
 		if err != nil {
 			copyErrors.Add(1)
+			logger.Printf("ERROR: Failed to copy request body: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -48,6 +54,7 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 		reader, err := tapalcatl.NewMetatileReader(offset, bytes.NewReader(buf.Bytes()), body_size)
 		if err != nil {
 			metatileErrors.Add(1)
+			logger.Printf("ERROR: Failed to read metatile: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			return
 		}

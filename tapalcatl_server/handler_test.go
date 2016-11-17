@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"github.com/tilezen/tapalcatl"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"testing"
 )
 
@@ -84,7 +86,8 @@ func TestHandlerMiss(t *testing.T) {
 	}
 	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*Response)}
 	proxy := &fakeProxy{}
-	h := MetatileHandler(parser, 1, mimes, storage, proxy)
+	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
+	h := MetatileHandler(parser, 1, mimes, storage, proxy, logger)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}
@@ -147,7 +150,8 @@ func TestHandlerHit(t *testing.T) {
 	}
 
 	proxy := &fakeProxy{}
-	h := MetatileHandler(parser, 1, mimes, storage, proxy)
+	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
+	h := MetatileHandler(parser, 1, mimes, storage, proxy, logger)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}
