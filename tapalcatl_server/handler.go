@@ -52,8 +52,24 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 			return
 		}
 
-		resp.Header.Del("Content-Length")
-		resp.Header.Set("Content-Type", mime_type[coord.Format])
+		// we don't want all the headers - some may refer only to things which were valid for the response from storage. we do want to keep the ETag / Last-Modified to preserve cache behaviour.
+		new_headers := make(http.Header)
+		keep_headers := []string{
+			"ETag",
+			"Last-Modified",
+		}
+		for _, key := range keep_headers {
+			val := resp.Header.Get(key)
+			if val != "" {
+				new_headers.Set(key, val)
+			}
+		}
+		if mime, ok := mime_type[coord.Format]; ok {
+			new_headers.Set("Content-Type", mime)
+		}
+
+		// note: keep status code, perhaps it's a 304 Not Modified.
+		resp.Header = new_headers
 		resp.Body = reader
 		resp.WriteResponse(rw)
 	})

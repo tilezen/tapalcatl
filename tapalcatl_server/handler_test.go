@@ -134,9 +134,15 @@ func TestHandlerHit(t *testing.T) {
 		t.Fatalf("Unable to make test zip: %s", err.Error())
 	}
 
+	header := make(http.Header)
+	header.Set("Content-Type", "application/zip")
+	header.Set("ETag", "1234")
+	header.Set("Last-Modified", "Thu, 17 Nov 2016 12:27:00 UTC")
+	header.Set("X-Mz-Ignore-Me", "1")
+
 	storage.storage[metatile] = &Response{
 		StatusCode: 200,
-		Header:     make(http.Header),
+		Header:     header,
 		Body:       &bufferReadCloser{reader: bytes.NewReader(zipfile.Bytes())},
 	}
 
@@ -153,4 +159,14 @@ func TestHandlerHit(t *testing.T) {
 	if proxy.count != 0 {
 		t.Fatalf("Expected request not to hit the proxy, but proxy hits %d != 0", proxy.count)
 	}
+	checkHeader := func(key, exp string) {
+		act := rw.header.Get(key)
+		if act != exp {
+			t.Fatalf("Expected HTTP header %#v to be %#v but was %#v", key, exp, act)
+		}
+	}
+	checkHeader("Content-Type", "application/json")
+	checkHeader("ETag", "1234")
+	checkHeader("Last-Modified", "Thu, 17 Nov 2016 12:27:00 UTC")
+	checkHeader("X-Mz-Ignore-Me", "")
 }
