@@ -6,6 +6,7 @@ import (
 	"github.com/NYTimes/gziphandler"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/imkira/go-interpol"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
@@ -25,13 +26,40 @@ func getHealth(rw http.ResponseWriter, _ *http.Request) {
 	rw.WriteHeader(200)
 }
 
+type s3Config struct {
+	Bucket     string
+	KeyPattern string
+	Prefix     string
+}
+
+type fileConfig struct {
+	BaseDir string
+}
+
+type proxyURL struct {
+	url *url.URL
+}
+
 type patternConfig struct {
-	Bucket       string
-	KeyPattern   string
-	Prefix       string
+	S3           *s3Config   `omitempty`
+	File         *fileConfig `omitempty`
 	Layer        string
-	ProxyURL     url.URL
+	ProxyURL     *proxyURL
 	MetatileSize int
+}
+
+func (u *proxyURL) UnmarshalJSON(j []byte) error {
+	var str string
+	err := json.Unmarshal(j, &str)
+	if err != nil {
+		return err
+	}
+	local, err := url.Parse(str)
+	if err != nil {
+		return err
+	}
+	u.url = local
+	return nil
 }
 
 type patternsOption struct {
@@ -130,6 +158,13 @@ func (_ *MuxParser) Parse(req *http.Request) (t tapalcatl.TileCoord, c Condition
 	return
 }
 
+func copyHeader(new_headers http.Header, key string, old_headers http.Header) {
+	val := old_headers.Get(key)
+	if val != "" {
+		new_headers.Set(key, val)
+	}
+}
+
 func main() {
 	var listen, healthcheck, debug_host string
 	var poolSize, poolWidth int
@@ -142,9 +177,14 @@ func main() {
 	f := flag.NewFlagSetWithEnvPrefix(os.Args[0], "TAPALCATL", 0)
 	f.Var(&patterns, "patterns",
 		`JSON object of patterns to use when matching incoming tile requests, each pattern should map to an object containing:
-	Bucket       string   Name of S3 bucket to fetch from.
-	KeyPattern   string   Pattern to fill with variables from the main pattern to make the S3 key.
-	Prefix       string   Prefix to use in this bucket.
+	S3 {                  Object present when the storage should be from S3.
+	  Bucket     string   Name of S3 bucket to fetch from.
+	  KeyPattern string   Pattern to fill with variables from the main pattern to make the S3 key.
+	  Prefix     string   Prefix to use in this bucket.
+	}
+	File {                Object present when the storage should be from disk.
+	  BaseDir    string   Base directory to look for files under.
+	}
 	Layer        string   Name of layer to use in this bucket.
 	ProxyURL     url.URL  URL to proxy requests to. The path part is ignored.
 	MetatileSize int      Number of tiles in each dimension of the metatile.
@@ -170,25 +210,66 @@ func main() {
 
 	r := mux.NewRouter()
 
-	// start up the AWS config session. this is safe to share amongst request threads
-	sess, err := session.NewSession()
-	if err != nil {
-		logger.Fatalf("Unable to set up AWS session: %s", err.Error())
+	needS3 := false
+	for pattern, cfg := range patterns.patterns {
+		if cfg.S3 != nil {
+			if cfg.File != nil {
+				logger.Fatalf("Only one storage may be configured for each Pattern, but %#v has both S3 and File.", pattern)
+			}
+			needS3 = true
+		} else if cfg.File == nil {
+			logger.Fatalf("No storage configured for pattern %#v.", pattern)
+		}
+	}
+
+	var sess *session.Session
+	if needS3 {
+		var err error
+		// start up the AWS config session. this is safe to share amongst request threads
+		sess, err = session.NewSession()
+		if err != nil {
+			logger.Fatalf("Unable to set up AWS session: %s", err.Error())
+		}
 	}
 
 	bufferPool := bpool.NewBytePool(poolSize, poolWidth)
 
 	for pattern, cfg := range patterns.patterns {
 		parser := &MuxParser{}
-		storage := NewS3Storage(s3.New(sess), cfg.Bucket, cfg.KeyPattern, cfg.Prefix, cfg.Layer)
+
+		var storage Getter
+		if cfg.S3 != nil {
+			storage = NewS3Storage(s3.New(sess), cfg.S3.Bucket, cfg.S3.KeyPattern, cfg.S3.Prefix, cfg.Layer)
+		} else {
+			storage = NewFileStorage(cfg.File.BaseDir, cfg.Layer)
+		}
+
 		proxy := &httputil.ReverseProxy{
 			Director: func(req *http.Request) {
-				// overwrite scheme, user, host and path. leave path, query params and fragment as they are in the incoming request.
-				req.URL.Scheme = cfg.ProxyURL.Scheme
-				req.URL.Opaque = cfg.ProxyURL.Opaque
-				req.URL.User = cfg.ProxyURL.User
-				req.URL.Host = cfg.ProxyURL.Host
-				req.URL.Path = cfg.ProxyURL.Path
+				// clear out most of the headers, particularly Host:
+				// but we want to keep the if-modified-since and if-none-match
+				new_headers := make(http.Header)
+				copyHeader(new_headers, "If-Modified-Since", req.Header)
+				copyHeader(new_headers, "If-None-Match", req.Header)
+				copyHeader(new_headers, "X-Forwarded-For", req.Header)
+				copyHeader(new_headers, "X-Real-IP", req.Header)
+				req.Header = new_headers
+
+				// overwrite scheme, user and host. leave query params and fragment as they are in the incoming request. interpolate path.
+				req.URL.Scheme = cfg.ProxyURL.url.Scheme
+				req.URL.Opaque = cfg.ProxyURL.url.Opaque
+				req.URL.User = cfg.ProxyURL.url.User
+				req.URL.Host = cfg.ProxyURL.url.Host
+				req.Host = cfg.ProxyURL.url.Host
+
+				var err error
+				vars := mux.Vars(req)
+				vars["layer"] = cfg.Layer
+				req.URL.Path, err = interpol.WithMap(cfg.ProxyURL.url.Path, vars)
+				if err != nil {
+					// can't return error, can only log.
+					logger.Printf("ERROR: Unable to interpolate string %#v with vars %#v: %s", cfg.ProxyURL.url.Path, vars, err.Error())
+				}
 			},
 			ErrorLog:   logger,
 			BufferPool: bufferPool,
@@ -211,7 +292,8 @@ func main() {
 	}
 	r.HandleFunc("/debug/vars", expvar_func).Methods("GET")
 
-	http.Handle("/", handlers.CombinedLoggingHandler(os.Stdout, handlers.CORS()(r)))
+	corsHandler := handlers.CORS()(r)
+	logHandler := handlers.CombinedLoggingHandler(os.Stdout, corsHandler)
 
-	logger.Fatal(http.ListenAndServe(listen, r))
+	logger.Fatal(http.ListenAndServe(listen, logHandler))
 }

@@ -9,6 +9,8 @@ import (
 	"github.com/imkira/go-interpol"
 	"github.com/tilezen/tapalcatl"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -143,4 +145,39 @@ func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error) {
 	resp.Body = output.Body
 
 	return resp, nil
+}
+
+type FileStorage struct {
+	baseDir string
+	layer string
+}
+
+func NewFileStorage(baseDir, layer string) *FileStorage {
+	return &FileStorage{
+		baseDir: baseDir,
+		layer: layer,
+	}
+}
+
+func (f *FileStorage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error) {
+	tilepath := filepath.Join(f.baseDir, f.layer, filepath.FromSlash(t.FileName()))
+	file, err := os.Open(tilepath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			resp := &Response{
+				StatusCode: 404,
+			}
+			return resp, nil
+
+		} else {
+			return nil, err
+		}
+	} else {
+		resp := &Response{
+			StatusCode: 200,
+			Header: make(http.Header),
+			Body: file,
+		}
+		return resp, nil
+	}
 }
