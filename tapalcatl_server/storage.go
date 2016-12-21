@@ -149,13 +149,13 @@ func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error) {
 
 type FileStorage struct {
 	baseDir string
-	layer string
+	layer   string
 }
 
 func NewFileStorage(baseDir, layer string) *FileStorage {
 	return &FileStorage{
 		baseDir: baseDir,
-		layer: layer,
+		layer:   layer,
 	}
 }
 
@@ -175,8 +175,8 @@ func (f *FileStorage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error)
 	} else {
 		resp := &Response{
 			StatusCode: 200,
-			Header: make(http.Header),
-			Body: file,
+			Header:     make(http.Header),
+			Body:       file,
 		}
 		return resp, nil
 	}

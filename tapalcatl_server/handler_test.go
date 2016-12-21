@@ -111,7 +111,7 @@ func (_ *emptyReadCloser) Close() error {
 	return nil
 }
 
-type bufferReadCloser struct{
+type bufferReadCloser struct {
 	reader *bytes.Reader
 }
 
