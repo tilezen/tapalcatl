@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/NYTimes/gziphandler"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gorilla/handlers"
@@ -30,6 +31,7 @@ type s3Config struct {
 	Bucket     string
 	KeyPattern string
 	Prefix     string
+	Region     *string
 }
 
 type fileConfig struct {
@@ -41,8 +43,8 @@ type proxyURL struct {
 }
 
 type patternConfig struct {
-	S3           *s3Config   `json:"omitempty"`
-	File         *fileConfig `json:"omitempty"`
+	S3           *s3Config
+	File         *fileConfig
 	Layer        string
 	ProxyURL     *proxyURL
 	MetatileSize int
@@ -181,6 +183,7 @@ func main() {
 	  Bucket     string   Name of S3 bucket to fetch from.
 	  KeyPattern string   Pattern to fill with variables from the main pattern to make the S3 key.
 	  Prefix     string   Prefix to use in this bucket.
+	  Region     string   AWS region to connect to.
 	}
 	File {                Object present when the storage should be from disk.
 	  BaseDir    string   Base directory to look for files under.
@@ -224,9 +227,26 @@ func main() {
 
 	var sess *session.Session
 	if needS3 {
-		var err error
+
+		// ensure that the region configured is the same across all s3 configuration
+		var region *string
+		for _, cfg := range patterns.patterns {
+			if cfg.S3 != nil && cfg.S3.Region != nil {
+				if region != nil && *region != *cfg.S3.Region {
+					logger.Fatalf("Multiple s3 regions configured: %s and %s", *region, *cfg.S3.Region)
+				}
+				region = cfg.S3.Region
+			}
+		}
+
 		// start up the AWS config session. this is safe to share amongst request threads
-		sess, err = session.NewSession()
+		if region == nil {
+			sess, err = session.NewSession()
+		} else {
+			sess, err = session.NewSessionWithOptions(session.Options{
+				Config: aws.Config{Region: region},
+			})
+		}
 		if err != nil {
 			logger.Fatalf("Unable to set up AWS session: %s", err.Error())
 		}
