@@ -41,8 +41,8 @@ type proxyURL struct {
 }
 
 type patternConfig struct {
-	S3           *s3Config   `omitempty`
-	File         *fileConfig `omitempty`
+	S3           *s3Config   `json:"omitempty"`
+	File         *fileConfig `json:"omitempty"`
 	Layer        string
 	ProxyURL     *proxyURL
 	MetatileSize int

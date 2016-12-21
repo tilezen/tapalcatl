@@ -79,7 +79,7 @@ func (f *fakeResponseWriter) WriteHeader(status int) {
 }
 
 func TestHandlerMiss(t *testing.T) {
-	tile := tapalcatl.TileCoord{0, 0, 0, "json"}
+	tile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: tile}
 	mimes := map[string]string{
 		"json": "application/json",
@@ -124,14 +124,14 @@ func (b *bufferReadCloser) Close() error {
 }
 
 func TestHandlerHit(t *testing.T) {
-	tile := tapalcatl.TileCoord{0, 0, 0, "json"}
+	tile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: tile}
 	mimes := map[string]string{
 		"json": "application/json",
 	}
 	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*Response)}
 
-	metatile := tapalcatl.TileCoord{0, 0, 0, "zip"}
+	metatile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
 	zipfile, err := makeTestZip(tile, "{}")
 	if err != nil {
 		t.Fatalf("Unable to make test zip: %s", err.Error())
