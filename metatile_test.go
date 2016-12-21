@@ -70,7 +70,7 @@ func coordEquals(t *testing.T, name string, exp, act TileCoord) {
 		t.Fatalf("Expected %s Y to be %d but was %d.", name, exp.Y, act.Y)
 	}
 	if exp.Format != act.Format {
-		t.Fatalf("Expected %s Format to be %d but was %d.", name, exp.Format, act.Format)
+		t.Fatalf("Expected %s Format to be %s but was %s.", name, exp.Format, act.Format)
 	}
 }
 

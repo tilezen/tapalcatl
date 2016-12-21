@@ -6,9 +6,9 @@ import (
 	"github.com/NYTimes/gziphandler"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/imkira/go-interpol"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"github.com/imkira/go-interpol"
 	"github.com/namsral/flag"
 	"github.com/oxtoacart/bpool"
 	"github.com/tilezen/tapalcatl"
@@ -41,8 +41,8 @@ type proxyURL struct {
 }
 
 type patternConfig struct {
-	S3           *s3Config   `omitempty`
-	File         *fileConfig `omitempty`
+	S3           *s3Config   `json:"omitempty"`
+	File         *fileConfig `json:"omitempty"`
 	Layer        string
 	ProxyURL     *proxyURL
 	MetatileSize int

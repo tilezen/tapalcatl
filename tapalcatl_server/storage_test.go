@@ -28,10 +28,10 @@ func (m *mockS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
 		*last_mod = time.Date(2016, time.November, 17, 12, 27, 0, 0, time.UTC)
 
 		obj := &s3.GetObjectOutput{
-			Body: &emptyReadCloser{},
+			Body:          &emptyReadCloser{},
 			ContentLength: length,
-			ETag: etag,
-			LastModified: last_mod,
+			ETag:          etag,
+			LastModified:  last_mod,
 		}
 		return obj, nil
 
@@ -50,7 +50,7 @@ func TestS3StorageEmpty(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer)
 
-	resp, err := storage.Get(tapalcatl.TileCoord{0, 0, 0, "zip"}, Condition{})
+	resp, err := storage.Get(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
@@ -69,7 +69,7 @@ func TestS3Storage(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer)
 
-	tile := tapalcatl.TileCoord{0, 0, 0, "zip"}
+	tile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
 	key, err := storage.objectKey(tile)
 	if err != nil {
 		t.Fatalf("Unable to calculate key for tile: %s", err.Error())

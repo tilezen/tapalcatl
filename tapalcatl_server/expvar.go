@@ -15,9 +15,9 @@ var (
 	numRequests     *expvar.Int
 	proxiedRequests *expvar.Int
 
-	avgTotalTime    *expvar.Float
+	avgTotalTime *expvar.Float
 
-	totalRequestTime    int64
+	totalRequestTime int64
 )
 
 func init() {
