@@ -234,7 +234,7 @@ func main() {
 	for pattern, cfg := range patterns.patterns {
 		parser := &MuxParser{}
 
-		var storage Getter
+		var storage Storage
 		if cfg.S3 != nil {
 			storage = NewS3Storage(s3.New(sess), cfg.S3.Bucket, cfg.S3.KeyPattern, cfg.S3.Prefix, cfg.Layer)
 		} else {

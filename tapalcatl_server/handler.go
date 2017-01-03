@@ -13,7 +13,7 @@ type Parser interface {
 	Parse(*http.Request) (tapalcatl.TileCoord, Condition, error)
 }
 
-func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Getter, logger *log.Logger) http.Handler {
+func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Storage, logger *log.Logger) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		numRequests.Add(1)
 		start_time := time.Now()
@@ -31,10 +31,10 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 
 		meta_coord, offset := coord.MetaAndOffset(metatile_size)
 
-		storageResult, err := storage.Get(meta_coord, cond)
+		storageResult, err := storage.Fetch(meta_coord, cond)
 		if err != nil || storageResult.NotFound {
 			if err != nil {
-				storageGetErrors.Add(1)
+				storageFetchErrors.Add(1)
 				logger.Printf("WARNING: Failed metatile storage get: %s", err.Error())
 			} else {
 				numStorageMisses.Add(1)

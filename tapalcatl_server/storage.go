@@ -8,14 +8,33 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/imkira/go-interpol"
 	"github.com/tilezen/tapalcatl"
-	"net/http"
+	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
-	"strings"
 	"time"
 )
+
+type Condition struct {
+	IfModifiedSince *time.Time
+	IfNoneMatch     *string
+}
+
+type SuccessfulResponse struct {
+	Body         io.ReadCloser
+	LastModified *time.Time
+	ETag         *string
+}
+
+type StorageResponse struct {
+	Response    *SuccessfulResponse
+	NotModified bool
+	NotFound    bool
+}
+
+type Storage interface {
+	Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error)
+}
 
 type S3Storage struct {
 	client     s3iface.S3API
@@ -55,68 +74,8 @@ func (s *S3Storage) objectKey(t tapalcatl.TileCoord) (string, error) {
 	return interpol.WithMap(s.keyPattern, m)
 }
 
-func getHeader(m reflect.Value, f reflect.StructField) (key, value string, ok bool) {
-	if ok = m.IsValid(); !ok {
-		return
-	}
-
-	// don't do private fields
-	if ok = f.Name[0:1] != strings.ToLower(f.Name[0:1]); !ok {
-		return
-	}
-
-	if m.Kind() == reflect.Ptr {
-		m = m.Elem()
-	}
-	if ok = m.IsValid(); !ok {
-		return
-	}
-
-	location := f.Tag.Get("location")
-	if ok = location == "header"; !ok {
-		return
-	}
-
-	key = f.Tag.Get("locationName")
-	if key == "" {
-		key = f.Name
-	}
-
-	m = reflect.Indirect(m)
-	if ok = m.IsValid(); !ok {
-		return
-	}
-
-	switch val := m.Interface().(type) {
-	case string:
-		value = val
-	case time.Time:
-		value = val.Format(time.RFC1123)
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr:
-		value = fmt.Sprintf("%d", val)
-	default:
-		ok = false
-	}
-
-	return
-}
-
-func setHeaders(h http.Header, params interface{}) {
-	v := reflect.ValueOf(params).Elem()
-
-	for i := 0; i < v.NumField(); i++ {
-		m := v.Field(i)
-		f := v.Type().Field(i)
-
-		key, val, ok := getHeader(m, f)
-		if ok {
-			h.Set(key, val)
-		}
-	}
-}
-
-func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*GetResponse, error) {
-	var result *GetResponse
+func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error) {
+	var result *StorageResponse
 
 	key, err := s.objectKey(t)
 	if err != nil {
@@ -135,12 +94,12 @@ func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*GetResponse, error
 			// NOTE: the way to distinguish seems to be string matching on the code ...
 			switch awsErr.Code() {
 			case "NoSuchKey":
-				result = &GetResponse{
+				result = &StorageResponse{
 					NotFound: true,
 				}
 				return result, nil
 			case "NotModified":
-				result = &GetResponse{
+				result = &StorageResponse{
 					NotModified: true,
 				}
 				return result, nil
@@ -150,7 +109,7 @@ func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*GetResponse, error
 		}
 	}
 
-	result = &GetResponse{
+	result = &StorageResponse{
 		Response: &SuccessfulResponse{
 			Body:         output.Body,
 			LastModified: output.LastModified,
@@ -173,12 +132,12 @@ func NewFileStorage(baseDir, layer string) *FileStorage {
 	}
 }
 
-func (f *FileStorage) Get(t tapalcatl.TileCoord, c Condition) (*GetResponse, error) {
+func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error) {
 	tilepath := filepath.Join(f.baseDir, f.layer, filepath.FromSlash(t.FileName()))
 	file, err := os.Open(tilepath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			resp := &GetResponse{
+			resp := &StorageResponse{
 				NotFound: true,
 			}
 			return resp, nil
@@ -187,7 +146,7 @@ func (f *FileStorage) Get(t tapalcatl.TileCoord, c Condition) (*GetResponse, err
 			return nil, err
 		}
 	} else {
-		resp := &GetResponse{
+		resp := &StorageResponse{
 			Response: &SuccessfulResponse{
 				Body: file,
 			},

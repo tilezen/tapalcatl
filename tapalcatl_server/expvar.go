@@ -9,7 +9,7 @@ import (
 
 var (
 	requestParseErrors  *expvar.Int
-	storageGetErrors    *expvar.Int
+	storageFetchErrors  *expvar.Int
 	storageReadErrors   *expvar.Int
 	metatileReadErrors  *expvar.Int
 	responseWriteErrors *expvar.Int
@@ -28,7 +28,7 @@ var (
 
 func init() {
 	requestParseErrors = expvar.NewInt("requestParseErrors")
-	storageGetErrors = expvar.NewInt("storageGetErrors")
+	storageFetchErrors = expvar.NewInt("storageFetchErrors")
 	storageReadErrors = expvar.NewInt("storageReadErrors")
 	metatileReadErrors = expvar.NewInt("metatileReadErrors")
 	responseWriteErrors = expvar.NewInt("responseWriteErrors")

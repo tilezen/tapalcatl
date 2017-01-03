@@ -40,15 +40,15 @@ func (f *fakeParser) Parse(_ *http.Request) (tapalcatl.TileCoord, Condition, err
 }
 
 type fakeStorage struct {
-	storage map[tapalcatl.TileCoord]*GetResponse
+	storage map[tapalcatl.TileCoord]*StorageResponse
 }
 
-func (f *fakeStorage) Get(t tapalcatl.TileCoord, _ Condition) (*GetResponse, error) {
+func (f *fakeStorage) Fetch(t tapalcatl.TileCoord, _ Condition) (*StorageResponse, error) {
 	resp, ok := f.storage[t]
 	if ok {
 		return resp, nil
 	} else {
-		return &GetResponse{NotFound: true}, nil
+		return &StorageResponse{NotFound: true}, nil
 	}
 }
 
@@ -75,7 +75,7 @@ func TestHandlerMiss(t *testing.T) {
 	mimes := map[string]string{
 		"json": "application/json",
 	}
-	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*GetResponse)}
+	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*StorageResponse)}
 	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
 	h := MetatileHandler(parser, 1, mimes, storage, logger)
 
@@ -116,7 +116,7 @@ func TestHandlerHit(t *testing.T) {
 	mimes := map[string]string{
 		"json": "application/json",
 	}
-	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*GetResponse)}
+	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*StorageResponse)}
 
 	metatile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
 	zipfile, err := makeTestZip(tile, "{}")
@@ -130,7 +130,7 @@ func TestHandlerHit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Couldn't parse time %s: %s", lastModifiedStr, err)
 	}
-	storage.storage[metatile] = &GetResponse{
+	storage.storage[metatile] = &StorageResponse{
 		Response: &SuccessfulResponse{
 			Body:         &bufferReadCloser{reader: bytes.NewReader(zipfile.Bytes())},
 			LastModified: &lastModified,
