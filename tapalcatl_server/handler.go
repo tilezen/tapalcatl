@@ -13,7 +13,7 @@ type Parser interface {
 	Parse(*http.Request) (tapalcatl.TileCoord, Condition, error)
 }
 
-func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Getter, proxy http.Handler, logger *log.Logger) http.Handler {
+func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Getter, logger *log.Logger) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		numRequests.Add(1)
 		start_time := time.Now()
@@ -23,7 +23,7 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 
 		coord, cond, err := p.Parse(req)
 		if err != nil {
-			parseErrors.Add(1)
+			requestParseErrors.Add(1)
 			logger.Printf("WARNING: Failed to parse request: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusBadRequest)
 			return
@@ -31,53 +31,62 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 
 		meta_coord, offset := coord.MetaAndOffset(metatile_size)
 
-		resp, err := storage.Get(meta_coord, cond)
-		if err != nil {
-			logger.Printf("WARNING: Failed fetch metatile from storage: %s", err.Error())
-		}
-		if err != nil || resp.StatusCode == 404 {
-			proxiedRequests.Add(1)
-			proxy.ServeHTTP(rw, req)
+		storageResult, err := storage.Get(meta_coord, cond)
+		if err != nil || storageResult.NotFound {
+			if err != nil {
+				storageGetErrors.Add(1)
+				logger.Printf("WARNING: Failed metatile storage get: %s", err.Error())
+			} else {
+				numStorageMisses.Add(1)
+			}
+			http.NotFound(rw, req)
 			return
 		}
+		numStorageHits.Add(1)
+		if storageResult.NotModified {
+			numStorageNotModified.Add(1)
+			rw.WriteHeader(http.StatusNotModified)
+			return
+		}
+		numStorageReads.Add(1)
 
 		// metatile reader needs to be able to seek in the buffer and know its size. the easiest way to ensure that is to buffer the whole thing into memory.
+		storageResp := storageResult.Response
 		var buf bytes.Buffer
-		body_size, err := io.Copy(&buf, resp.Body)
+		bodySize, err := io.Copy(&buf, storageResp.Body)
 		if err != nil {
-			copyErrors.Add(1)
-			logger.Printf("ERROR: Failed to copy request body: %s", err.Error())
+			storageReadErrors.Add(1)
+			logger.Printf("ERROR: Failed to read storage body: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		storageBytes := buf.Bytes()
 
-		reader, err := tapalcatl.NewMetatileReader(offset, bytes.NewReader(buf.Bytes()), body_size)
+		headers := rw.Header()
+		if mime, ok := mime_type[coord.Format]; ok {
+			headers.Set("Content-Type", mime)
+		}
+		if lastMod := storageResp.LastModified; lastMod != nil {
+			lastModifiedFormatted := lastMod.Format(time.RFC1123Z)
+			headers.Set("Last-Modified", lastModifiedFormatted)
+		}
+		if etag := storageResp.ETag; etag != nil {
+			headers.Set("ETag", *etag)
+		}
+
+		reader, err := tapalcatl.NewMetatileReader(offset, bytes.NewReader(storageBytes), bodySize)
 		if err != nil {
-			metatileErrors.Add(1)
+			metatileReadErrors.Add(1)
 			logger.Printf("ERROR: Failed to read metatile: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// we don't want all the headers - some may refer only to things which were valid for the response from storage. we do want to keep the ETag / Last-Modified to preserve cache behaviour.
-		new_headers := make(http.Header)
-		keep_headers := []string{
-			"ETag",
-			"Last-Modified",
+		rw.WriteHeader(http.StatusOK)
+		_, err = io.Copy(rw, reader)
+		if err != nil {
+			responseWriteErrors.Add(1)
+			logger.Printf("ERROR: Failed to write response body: %s", err.Error())
 		}
-		for _, key := range keep_headers {
-			val := resp.Header.Get(key)
-			if val != "" {
-				new_headers.Set(key, val)
-			}
-		}
-		if mime, ok := mime_type[coord.Format]; ok {
-			new_headers.Set("Content-Type", mime)
-		}
-
-		// note: keep status code, perhaps it's a 304 Not Modified.
-		resp.Header = new_headers
-		resp.Body = reader
-		resp.WriteResponse(rw)
 	})
 }

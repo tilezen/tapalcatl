@@ -9,15 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/imkira/go-interpol"
 	"github.com/namsral/flag"
-	"github.com/oxtoacart/bpool"
+	//	"github.com/oxtoacart/bpool"
 	"github.com/tilezen/tapalcatl"
 	"github.com/whosonfirst/go-httpony/stats"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -38,30 +35,11 @@ type fileConfig struct {
 	BaseDir string
 }
 
-type proxyURL struct {
-	url *url.URL
-}
-
 type patternConfig struct {
 	S3           *s3Config
 	File         *fileConfig
 	Layer        string
-	ProxyURL     *proxyURL
 	MetatileSize int
-}
-
-func (u *proxyURL) UnmarshalJSON(j []byte) error {
-	var str string
-	err := json.Unmarshal(j, &str)
-	if err != nil {
-		return err
-	}
-	local, err := url.Parse(str)
-	if err != nil {
-		return err
-	}
-	u.url = local
-	return nil
 }
 
 type patternsOption struct {
@@ -189,7 +167,6 @@ func main() {
 	  BaseDir    string   Base directory to look for files under.
 	}
 	Layer        string   Name of layer to use in this bucket.
-	ProxyURL     url.URL  URL to proxy requests to. The path part is ignored.
 	MetatileSize int      Number of tiles in each dimension of the metatile.
 `)
 	f.StringVar(&listen, "listen", ":8080", "interface and port to listen on")
@@ -208,7 +185,7 @@ func main() {
 	}
 
 	if len(patterns.patterns) == 0 {
-		logger.Fatalf("You must provide at least one pattern to proxy.")
+		logger.Fatalf("You must provide at least one pattern.")
 	}
 
 	r := mux.NewRouter()
@@ -252,7 +229,7 @@ func main() {
 		}
 	}
 
-	bufferPool := bpool.NewBytePool(poolSize, poolWidth)
+	// bufferPool := bpool.NewBytePool(poolSize, poolWidth)
 
 	for pattern, cfg := range patterns.patterns {
 		parser := &MuxParser{}
@@ -264,38 +241,7 @@ func main() {
 			storage = NewFileStorage(cfg.File.BaseDir, cfg.Layer)
 		}
 
-		proxy := &httputil.ReverseProxy{
-			Director: func(req *http.Request) {
-				// clear out most of the headers, particularly Host:
-				// but we want to keep the if-modified-since and if-none-match
-				new_headers := make(http.Header)
-				copyHeader(new_headers, "If-Modified-Since", req.Header)
-				copyHeader(new_headers, "If-None-Match", req.Header)
-				copyHeader(new_headers, "X-Forwarded-For", req.Header)
-				copyHeader(new_headers, "X-Real-IP", req.Header)
-				req.Header = new_headers
-
-				// overwrite scheme, user and host. leave query params and fragment as they are in the incoming request. interpolate path.
-				req.URL.Scheme = cfg.ProxyURL.url.Scheme
-				req.URL.Opaque = cfg.ProxyURL.url.Opaque
-				req.URL.User = cfg.ProxyURL.url.User
-				req.URL.Host = cfg.ProxyURL.url.Host
-				req.Host = cfg.ProxyURL.url.Host
-
-				var err error
-				vars := mux.Vars(req)
-				vars["layer"] = cfg.Layer
-				req.URL.Path, err = interpol.WithMap(cfg.ProxyURL.url.Path, vars)
-				if err != nil {
-					// can't return error, can only log.
-					logger.Printf("ERROR: Unable to interpolate string %#v with vars %#v: %s", cfg.ProxyURL.url.Path, vars, err.Error())
-				}
-			},
-			ErrorLog:   logger,
-			BufferPool: bufferPool,
-		}
-
-		h := MetatileHandler(parser, cfg.MetatileSize, mime_map.mimes, storage, proxy, logger)
+		h := MetatileHandler(parser, cfg.MetatileSize, mime_map.mimes, storage, logger)
 		gzipped := gziphandler.GzipHandler(h)
 
 		r.Handle(pattern, gzipped).Methods("GET")
@@ -314,6 +260,8 @@ func main() {
 
 	corsHandler := handlers.CORS()(r)
 	logHandler := handlers.CombinedLoggingHandler(os.Stdout, corsHandler)
+
+	logger.Printf("Server started and listening on %s\n", listen)
 
 	logger.Fatal(http.ListenAndServe(listen, logHandler))
 }

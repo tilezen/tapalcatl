@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 )
 
 func makeTestZip(tile tapalcatl.TileCoord, content string) (*bytes.Buffer, error) {
@@ -39,26 +40,16 @@ func (f *fakeParser) Parse(_ *http.Request) (tapalcatl.TileCoord, Condition, err
 }
 
 type fakeStorage struct {
-	storage map[tapalcatl.TileCoord]*Response
+	storage map[tapalcatl.TileCoord]*GetResponse
 }
 
-func (f *fakeStorage) Get(t tapalcatl.TileCoord, _ Condition) (*Response, error) {
+func (f *fakeStorage) Get(t tapalcatl.TileCoord, _ Condition) (*GetResponse, error) {
 	resp, ok := f.storage[t]
 	if ok {
 		return resp, nil
 	} else {
-		return &Response{StatusCode: 404}, nil
+		return &GetResponse{NotFound: true}, nil
 	}
-}
-
-type fakeProxy struct {
-	count int
-}
-
-func (f *fakeProxy) ServeHTTP(rw http.ResponseWriter, _ *http.Request) {
-	f.count += 1
-
-	rw.WriteHeader(http.StatusOK)
 }
 
 type fakeResponseWriter struct {
@@ -84,20 +75,16 @@ func TestHandlerMiss(t *testing.T) {
 	mimes := map[string]string{
 		"json": "application/json",
 	}
-	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*Response)}
-	proxy := &fakeProxy{}
+	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*GetResponse)}
 	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
-	h := MetatileHandler(parser, 1, mimes, storage, proxy, logger)
+	h := MetatileHandler(parser, 1, mimes, storage, logger)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}
 	h.ServeHTTP(rw, req)
 
-	if rw.status != 200 {
-		t.Fatalf("Expected 200 OK response, but got %d", rw.status)
-	}
-	if proxy.count != 1 {
-		t.Fatalf("Expected request to hit the proxy, but proxy hits %d != 1", proxy.count)
+	if rw.status != 404 {
+		t.Fatalf("Expected 404 response, but got %d", rw.status)
 	}
 }
 
@@ -129,7 +116,7 @@ func TestHandlerHit(t *testing.T) {
 	mimes := map[string]string{
 		"json": "application/json",
 	}
-	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*Response)}
+	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*GetResponse)}
 
 	metatile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
 	zipfile, err := makeTestZip(tile, "{}")
@@ -137,21 +124,22 @@ func TestHandlerHit(t *testing.T) {
 		t.Fatalf("Unable to make test zip: %s", err.Error())
 	}
 
-	header := make(http.Header)
-	header.Set("Content-Type", "application/zip")
-	header.Set("ETag", "1234")
-	header.Set("Last-Modified", "Thu, 17 Nov 2016 12:27:00 UTC")
-	header.Set("X-Mz-Ignore-Me", "1")
-
-	storage.storage[metatile] = &Response{
-		StatusCode: 200,
-		Header:     header,
-		Body:       &bufferReadCloser{reader: bytes.NewReader(zipfile.Bytes())},
+	etag := "1234"
+	lastModifiedStr := "Thu, 17 Nov 2016 12:27:00 +0000"
+	lastModified, err := time.Parse(time.RFC1123Z, lastModifiedStr)
+	if err != nil {
+		t.Fatalf("Couldn't parse time %s: %s", lastModifiedStr, err)
+	}
+	storage.storage[metatile] = &GetResponse{
+		Response: &SuccessfulResponse{
+			Body:         &bufferReadCloser{reader: bytes.NewReader(zipfile.Bytes())},
+			LastModified: &lastModified,
+			ETag:         &etag,
+		},
 	}
 
-	proxy := &fakeProxy{}
 	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
-	h := MetatileHandler(parser, 1, mimes, storage, proxy, logger)
+	h := MetatileHandler(parser, 1, mimes, storage, logger)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}
@@ -160,9 +148,6 @@ func TestHandlerHit(t *testing.T) {
 	if rw.status != 200 {
 		t.Fatalf("Expected 200 OK response, but got %d", rw.status)
 	}
-	if proxy.count != 0 {
-		t.Fatalf("Expected request not to hit the proxy, but proxy hits %d != 0", proxy.count)
-	}
 	checkHeader := func(key, exp string) {
 		act := rw.header.Get(key)
 		if act != exp {
@@ -170,7 +155,7 @@ func TestHandlerHit(t *testing.T) {
 		}
 	}
 	checkHeader("Content-Type", "application/json")
-	checkHeader("ETag", "1234")
-	checkHeader("Last-Modified", "Thu, 17 Nov 2016 12:27:00 UTC")
+	checkHeader("ETag", etag)
+	checkHeader("Last-Modified", lastModifiedStr)
 	checkHeader("X-Mz-Ignore-Me", "")
 }

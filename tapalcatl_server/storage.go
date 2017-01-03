@@ -115,7 +115,9 @@ func setHeaders(h http.Header, params interface{}) {
 	}
 }
 
-func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error) {
+func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*GetResponse, error) {
+	var result *GetResponse
+
 	key, err := s.objectKey(t)
 	if err != nil {
 		return nil, err
@@ -126,25 +128,37 @@ func (s *S3Storage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error) {
 	input.IfNoneMatch = c.IfNoneMatch
 
 	output, err := s.client.GetObject(input)
+	// check if we are an error, 304, or 404
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
-			// i would have thought there was a better way of detecting this error, but i haven't found one yet.
-			if awsErr.Code() == "No Such Key" {
-				resp := new(Response)
-				resp.StatusCode = 404
-				return resp, nil
+
+			// NOTE: the way to distinguish seems to be string matching on the code ...
+			switch awsErr.Code() {
+			case "NoSuchKey":
+				result = &GetResponse{
+					NotFound: true,
+				}
+				return result, nil
+			case "NotModified":
+				result = &GetResponse{
+					NotModified: true,
+				}
+				return result, nil
+			default:
+				return nil, err
 			}
 		}
-		return nil, err
 	}
 
-	resp := new(Response)
-	resp.StatusCode = 200
-	resp.Header = make(http.Header)
-	setHeaders(resp.Header, output)
-	resp.Body = output.Body
+	result = &GetResponse{
+		Response: &SuccessfulResponse{
+			Body:         output.Body,
+			LastModified: output.LastModified,
+			ETag:         output.ETag,
+		},
+	}
 
-	return resp, nil
+	return result, nil
 }
 
 type FileStorage struct {
@@ -159,13 +173,13 @@ func NewFileStorage(baseDir, layer string) *FileStorage {
 	}
 }
 
-func (f *FileStorage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error) {
+func (f *FileStorage) Get(t tapalcatl.TileCoord, c Condition) (*GetResponse, error) {
 	tilepath := filepath.Join(f.baseDir, f.layer, filepath.FromSlash(t.FileName()))
 	file, err := os.Open(tilepath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			resp := &Response{
-				StatusCode: 404,
+			resp := &GetResponse{
+				NotFound: true,
 			}
 			return resp, nil
 
@@ -173,10 +187,10 @@ func (f *FileStorage) Get(t tapalcatl.TileCoord, c Condition) (*Response, error)
 			return nil, err
 		}
 	} else {
-		resp := &Response{
-			StatusCode: 200,
-			Header:     make(http.Header),
-			Body:       file,
+		resp := &GetResponse{
+			Response: &SuccessfulResponse{
+				Body: file,
+			},
 		}
 		return resp, nil
 	}

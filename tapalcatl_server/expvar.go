@@ -8,12 +8,18 @@ import (
 )
 
 var (
-	parseErrors    *expvar.Int
-	copyErrors     *expvar.Int
-	metatileErrors *expvar.Int
+	requestParseErrors  *expvar.Int
+	storageGetErrors    *expvar.Int
+	storageReadErrors   *expvar.Int
+	metatileReadErrors  *expvar.Int
+	responseWriteErrors *expvar.Int
 
-	numRequests     *expvar.Int
-	proxiedRequests *expvar.Int
+	numStorageMisses      *expvar.Int
+	numStorageHits        *expvar.Int
+	numStorageNotModified *expvar.Int
+	numStorageReads       *expvar.Int
+
+	numRequests *expvar.Int
 
 	avgTotalTime *expvar.Float
 
@@ -21,12 +27,18 @@ var (
 )
 
 func init() {
-	parseErrors = expvar.NewInt("parseErrors")
-	copyErrors = expvar.NewInt("copyErrors")
-	metatileErrors = expvar.NewInt("metatileErrors")
+	requestParseErrors = expvar.NewInt("requestParseErrors")
+	storageGetErrors = expvar.NewInt("storageGetErrors")
+	storageReadErrors = expvar.NewInt("storageReadErrors")
+	metatileReadErrors = expvar.NewInt("metatileReadErrors")
+	responseWriteErrors = expvar.NewInt("responseWriteErrors")
+
+	numStorageMisses = expvar.NewInt("numStorageMisses")
+	numStorageHits = expvar.NewInt("numStorageHits")
+	numStorageNotModified = expvar.NewInt("numStorageNotModified")
+	numStorageReads = expvar.NewInt("numStorageReads")
 
 	numRequests = expvar.NewInt("numRequests")
-	proxiedRequests = expvar.NewInt("proxiedRequests")
 
 	avgTotalTime = expvar.NewFloat("avgTotalTime")
 
