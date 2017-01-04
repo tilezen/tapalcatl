@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/NYTimes/gziphandler"
@@ -10,7 +11,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
-	//	"github.com/oxtoacart/bpool"
+	"github.com/oxtoacart/bpool"
 	"github.com/tilezen/tapalcatl"
 	"github.com/whosonfirst/go-httpony/stats"
 	"log"
@@ -146,9 +147,18 @@ func (_ *MuxParser) Parse(req *http.Request) (t tapalcatl.TileCoord, c Condition
 	return
 }
 
+type OnDemandBufferManager struct{}
+
+func (bm *OnDemandBufferManager) Get() *bytes.Buffer {
+	return &bytes.Buffer{}
+}
+
+func (bm *OnDemandBufferManager) Put(buf *bytes.Buffer) {
+}
+
 func main() {
 	var listen, healthcheck, debugHost string
-	var poolSize, poolWidth int
+	var poolNumEntries, poolEntrySize int
 	hc := handlerConfig{}
 
 	// use this logger everywhere.
@@ -188,8 +198,8 @@ func main() {
 	f.String("config", "", "Config file to read values from.")
 	f.StringVar(&healthcheck, "healthcheck", "", "A path to respond to with a blank 200 OK. Intended for use by load balancer health checks.")
 	f.StringVar(&debugHost, "debugHost", "", "IP address of remote debug host allowed to read expvars at /debug/vars.")
-	f.IntVar(&poolSize, "poolsize", 0, "Number of byte buffers to cache in pool between requests.")
-	f.IntVar(&poolWidth, "poolwidth", 1, "Size of new byte buffers to create in the pool.")
+	f.IntVar(&poolNumEntries, "poolnumentries", 0, "Number of buffers to pool.")
+	f.IntVar(&poolEntrySize, "poolentrysize", 0, "Size of each buffer in pool.")
 
 	err := f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
@@ -206,6 +216,15 @@ func main() {
 	}
 
 	r := mux.NewRouter()
+
+	// buffer manager shared by all handlers
+	var bufferManager BufferManager
+
+	if poolNumEntries > 0 && poolEntrySize > 0 {
+		bufferManager = bpool.NewSizedBufferPool(poolNumEntries, poolEntrySize)
+	} else {
+		bufferManager = &OnDemandBufferManager{}
+	}
 
 	// set if we have s3 storage configured, and shared across all s3 sessions
 	var awsSession *session.Session
@@ -268,13 +287,11 @@ func main() {
 
 		parser := &MuxParser{}
 
-		h := MetatileHandler(parser, metatileSize, hc.Mime, storage, logger)
+		h := MetatileHandler(parser, metatileSize, hc.Mime, storage, bufferManager, logger)
 		gzipped := gziphandler.GzipHandler(h)
 
 		r.Handle(reqPattern, gzipped).Methods("GET")
 	}
-
-	// bufferPool := bpool.NewBytePool(poolSize, poolWidth)
 
 	if len(healthcheck) > 0 {
 		r.HandleFunc(healthcheck, getHealth).Methods("GET")

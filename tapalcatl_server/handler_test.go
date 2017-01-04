@@ -77,7 +77,7 @@ func TestHandlerMiss(t *testing.T) {
 	}
 	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*StorageResponse)}
 	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
-	h := MetatileHandler(parser, 1, mimes, storage, logger)
+	h := MetatileHandler(parser, 1, mimes, storage, &OnDemandBufferManager{}, logger)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}
@@ -139,7 +139,7 @@ func TestHandlerHit(t *testing.T) {
 	}
 
 	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
-	h := MetatileHandler(parser, 1, mimes, storage, logger)
+	h := MetatileHandler(parser, 1, mimes, storage, &OnDemandBufferManager{}, logger)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}

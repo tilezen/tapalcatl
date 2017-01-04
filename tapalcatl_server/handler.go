@@ -13,7 +13,12 @@ type Parser interface {
 	Parse(*http.Request) (tapalcatl.TileCoord, Condition, error)
 }
 
-func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Storage, logger *log.Logger) http.Handler {
+type BufferManager interface {
+	Get() *bytes.Buffer
+	Put(*bytes.Buffer)
+}
+
+func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, storage Storage, bufferManager BufferManager, logger *log.Logger) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		numRequests.Add(1)
 		start_time := time.Now()
@@ -52,15 +57,21 @@ func MetatileHandler(p Parser, metatile_size int, mime_type map[string]string, s
 
 		// metatile reader needs to be able to seek in the buffer and know its size. the easiest way to ensure that is to buffer the whole thing into memory.
 		storageResp := storageResult.Response
-		var buf bytes.Buffer
-		bodySize, err := io.Copy(&buf, storageResp.Body)
+
+		buf := bufferManager.Get()
+		defer bufferManager.Put(buf)
+
+		bodySize, err := io.Copy(buf, storageResp.Body)
 		if err != nil {
 			storageReadErrors.Add(1)
 			logger.Printf("ERROR: Failed to read storage body: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		storageBytes := buf.Bytes()
+		// TODO fold into logging/metrics work
+		// logger.Printf("buffer size: len(%d) cap(%d)", len(storageBytes), cap(storageBytes))
 
 		headers := rw.Header()
 		if mime, ok := mime_type[coord.Format]; ok {
