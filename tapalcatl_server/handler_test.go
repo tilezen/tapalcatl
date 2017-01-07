@@ -35,8 +35,12 @@ type fakeParser struct {
 	tile tapalcatl.TileCoord
 }
 
-func (f *fakeParser) Parse(_ *http.Request) (tapalcatl.TileCoord, Condition, error) {
-	return f.tile, Condition{}, nil
+func (f *fakeParser) Parse(_ *http.Request) (*ParseResult, error) {
+	result := &ParseResult{
+		Coord:       f.tile,
+		ContentType: "application/json",
+	}
+	return result, nil
 }
 
 type fakeStorage struct {

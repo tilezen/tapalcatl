@@ -108,43 +108,138 @@ func parseHTTPDates(date string) (*time.Time, error) {
 
 // MuxParser parses the tile coordinate from the captured arguments from
 // the gorilla mux router.
-type MuxParser struct{}
+type MuxParser struct {
+	mimeMap map[string]string
+}
+
+type MimeParseError struct {
+	BadFormat string
+}
+
+func (mpe *MimeParseError) Error() string {
+	return fmt.Sprintf("Invalid format: %s", mpe.BadFormat)
+}
+
+type CoordParseError struct {
+	// relevant values are set when parse fails
+	BadZ string
+	BadX string
+	BadY string
+}
+
+func (cpe *CoordParseError) IsError() bool {
+	return cpe.BadZ != "" || cpe.BadX != "" || cpe.BadY != ""
+}
+
+func (cpe *CoordParseError) Error() string {
+	// TODO on multiple parse failures, can return back a concatenated string
+	if cpe.BadZ != "" {
+		return fmt.Sprintf("Invalid z: %s", cpe.BadZ)
+	}
+	if cpe.BadX != "" {
+		return fmt.Sprintf("Invalid x: %s", cpe.BadX)
+	}
+	if cpe.BadY != "" {
+		return fmt.Sprintf("Invalid y: %s", cpe.BadY)
+	}
+	panic("No coord parse error")
+}
+
+type CondParseError struct {
+	IfModifiedSinceError error
+}
+
+func (cpe *CondParseError) Error() string {
+	return cpe.IfModifiedSinceError.Error()
+}
+
+type ParseError struct {
+	MimeError  *MimeParseError
+	CoordError *CoordParseError
+	CondError  *CondParseError
+}
+
+func (pe *ParseError) Error() string {
+	if pe.MimeError != nil {
+		return pe.MimeError.Error()
+	} else if pe.CoordError != nil {
+		return pe.CoordError.Error()
+	} else if pe.CondError != nil {
+		return pe.CondError.Error()
+	} else {
+		panic("ParseError: No error")
+	}
+}
 
 // Parse ignores its argument and uses values from the capture.
-func (_ *MuxParser) Parse(req *http.Request) (t tapalcatl.TileCoord, c Condition, err error) {
+func (mp *MuxParser) Parse(req *http.Request) (*ParseResult, error) {
 	m := mux.Vars(req)
 
-	t.Z, err = strconv.Atoi(m["z"])
-	if err != nil {
-		return
-	}
-
-	t.X, err = strconv.Atoi(m["x"])
-	if err != nil {
-		return
-	}
-
-	t.Y, err = strconv.Atoi(m["y"])
-	if err != nil {
-		return
-	}
+	var t tapalcatl.TileCoord
+	var contentType string
+	var err error
+	var ok bool
 
 	t.Format = m["fmt"]
-
-	if_modified_since := req.Header.Get("If-Modified-Since")
-	if if_modified_since != "" {
-		c.IfModifiedSince, err = parseHTTPDates(if_modified_since)
-		if err != nil {
-			return
+	if contentType, ok = mp.mimeMap[t.Format]; !ok {
+		return nil, &ParseError{
+			MimeError: &MimeParseError{
+				BadFormat: t.Format,
+			},
 		}
 	}
 
-	if_none_match := req.Header.Get("If-None-Match")
-	if if_none_match != "" {
-		c.IfNoneMatch = &if_none_match
+	var coordError CoordParseError
+	z := m["z"]
+	t.Z, err = strconv.Atoi(z)
+	if err != nil {
+		coordError.BadZ = z
 	}
 
-	return
+	x := m["x"]
+	t.X, err = strconv.Atoi(x)
+	if err != nil {
+		coordError.BadX = x
+	}
+
+	y := m["y"]
+	t.Y, err = strconv.Atoi(y)
+	if err != nil {
+		coordError.BadY = y
+	}
+
+	if coordError.IsError() {
+		return nil, &ParseError{
+			CoordError: &coordError,
+		}
+	}
+
+	var condition Condition
+	var condError CondParseError
+
+	ifNoneMatch := req.Header.Get("If-None-Match")
+	if ifNoneMatch != "" {
+		condition.IfNoneMatch = &ifNoneMatch
+	}
+
+	parseResult := ParseResult{
+		Coord:       t,
+		Cond:        condition,
+		ContentType: contentType,
+	}
+
+	ifModifiedSince := req.Header.Get("If-Modified-Since")
+	if ifModifiedSince != "" {
+		parseResult.Cond.IfModifiedSince, err = parseHTTPDates(ifModifiedSince)
+		if err != nil {
+			condError.IfModifiedSinceError = err
+			return &parseResult, &ParseError{
+				CondError: &condError,
+			}
+		}
+	}
+
+	return &parseResult, nil
 }
 
 type OnDemandBufferManager struct{}
@@ -285,7 +380,9 @@ func main() {
 			logger.Fatalf("Unknown storage %s", t)
 		}
 
-		parser := &MuxParser{}
+		parser := &MuxParser{
+			mimeMap: hc.Mime,
+		}
 
 		h := MetatileHandler(parser, metatileSize, hc.Mime, storage, bufferManager, logger)
 		gzipped := gziphandler.GzipHandler(h)
