@@ -6,7 +6,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/tilezen/tapalcatl"
-	"strconv"
 	"testing"
 	"time"
 )
@@ -24,19 +23,18 @@ func (m *mockS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
 		etag := new(string)
 		*etag = "1234"
 
-		last_mod := new(time.Time)
-		*last_mod = time.Date(2016, time.November, 17, 12, 27, 0, 0, time.UTC)
+		lastMod := new(time.Time)
+		*lastMod = time.Date(2016, time.November, 17, 12, 27, 0, 0, time.UTC)
 
 		obj := &s3.GetObjectOutput{
-			Body:          &emptyReadCloser{},
-			ContentLength: length,
-			ETag:          etag,
-			LastModified:  last_mod,
+			Body:         &emptyReadCloser{},
+			ETag:         etag,
+			LastModified: lastMod,
 		}
 		return obj, nil
 
 	} else {
-		return nil, awserr.New("No Such Key", "The key was not found.", fmt.Errorf("Not Found."))
+		return nil, awserr.New("NoSuchKey", "The key was not found.", fmt.Errorf("Not Found."))
 	}
 }
 
@@ -50,12 +48,12 @@ func TestS3StorageEmpty(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer)
 
-	resp, err := storage.Get(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
+	resp, err := storage.Fetch(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
-	if resp.StatusCode != 404 {
-		t.Fatalf("Expected 404 response from empty storage, but got %d", resp.StatusCode)
+	if !resp.NotFound {
+		t.Fatalf("Expected 404 response from empty storage")
 	}
 }
 
@@ -78,32 +76,29 @@ func TestS3Storage(t *testing.T) {
 		t.Fatalf("Unexpected key calculation. Expected %#v, got %#v.", api.expectedKey, key)
 	}
 
-	resp, err := storage.Get(tile, Condition{})
+	resp, err := storage.Fetch(tile, Condition{})
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
-	if resp.StatusCode != 200 {
-		t.Fatalf("Expected 200 OK response from empty storage, but got %d", resp.StatusCode)
+	if resp.Response == nil {
+		t.Fatalf("Expected successful response from empty storage")
 	}
-	// check string header
-	etag := resp.Header.Get("ETag")
-	if etag != "1234" {
+	etag := resp.Response.ETag
+	if etag == nil {
+		t.Fatalf("Expected etag from empty storage")
+	}
+	if *etag != "1234" {
 		t.Fatalf("Expected ETag to be \"1234\", but got %#v", etag)
 	}
+
+	lastMod := resp.Response.LastModified
+	if lastMod == nil {
+		t.Fatalf("Missing last modified from storage")
+	}
 	// should be formatted in RFC 822 / 1123 format
-	last_mod := resp.Header.Get("Last-Modified")
-	exp_last_mod := "Thu, 17 Nov 2016 12:27:00 UTC"
-	if last_mod != exp_last_mod {
-		t.Fatalf("Expected Last-Modified to be %#v, but got %#v", exp_last_mod, last_mod)
-	}
-	// check integer header
-	content_length_hdr := resp.Header.Get("Content-Length")
-	content_length, err := strconv.ParseInt(content_length_hdr, 10, 64)
-	if err != nil {
-		t.Fatalf("Unable to parse Content-Length header %#v as int: %s", content_length_hdr, err.Error())
-	}
-	var exp_content_length int64 = 0
-	if content_length != exp_content_length {
-		t.Fatalf("Expected Content-Length to be %d, but was %d.", exp_content_length, content_length)
+	expLastModStr := "Thu, 17 Nov 2016 12:27:00 +0000"
+	lastModStr := lastMod.Format(time.RFC1123Z)
+	if expLastModStr != lastModStr {
+		t.Fatalf("Expected Last-Modified to be %#v, but got %#v", expLastModStr, lastModStr)
 	}
 }

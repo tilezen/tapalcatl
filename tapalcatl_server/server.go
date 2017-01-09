@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/NYTimes/gziphandler"
@@ -9,89 +10,75 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/imkira/go-interpol"
 	"github.com/namsral/flag"
 	"github.com/oxtoacart/bpool"
 	"github.com/tilezen/tapalcatl"
 	"github.com/whosonfirst/go-httpony/stats"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strconv"
 	"time"
 )
 
-func getHealth(rw http.ResponseWriter, _ *http.Request) {
-	rw.WriteHeader(200)
-}
+// the handler config is the container for the json configuration
+// storageDefinition contains the base options for a particular storage
+// storageConfig contains the specific options for a particular pattern
+// pattern ties together request patterns with storageConfig
+// the storageConfig "Type_" needs to match the key mapping names in Storage
+// awsConfig contains session-wide options for aws backed storage
 
-type s3Config struct {
+// "s3" and "file" are possible storage definitions
+
+type storageDefinition struct {
+	// common fields across all storage types
+	// these can be overridden in specific storage configuration
+	MetatileSize int
+
+	// s3 specific fields
+	Layer      string
 	Bucket     string
 	KeyPattern string
-	Prefix     string
-	Region     *string
-}
 
-type fileConfig struct {
+	// file specific fields
 	BaseDir string
 }
 
-type proxyURL struct {
-	url *url.URL
+// generic aws configuration applied to whole session
+type awsConfig struct {
+	Region *string
 }
 
-type patternConfig struct {
-	S3           *s3Config
-	File         *fileConfig
-	Layer        string
-	ProxyURL     *proxyURL
-	MetatileSize int
+// storage configuration, specific to a pattern
+type storageConfig struct {
+	// should match storage definition name, "s3" or "file"
+	Type_ string `json:"type"`
+
+	MetatileSize *int
+
+	// Prefix is required to be set for s3 storage
+	Prefix     *string
+	KeyPattern *string
+	Layer      *string
+
+	BaseDir *string
 }
 
-func (u *proxyURL) UnmarshalJSON(j []byte) error {
-	var str string
-	err := json.Unmarshal(j, &str)
-	if err != nil {
-		return err
-	}
-	local, err := url.Parse(str)
-	if err != nil {
-		return err
-	}
-	u.url = local
-	return nil
+type handlerConfig struct {
+	Aws     *awsConfig
+	Storage map[string]storageDefinition
+	Pattern map[string]storageConfig
+	Mime    map[string]string
 }
 
-type patternsOption struct {
-	patterns map[string]*patternConfig
+func (h *handlerConfig) String() string {
+	return fmt.Sprintf("%#v", *h)
 }
 
-func (p *patternsOption) String() string {
-	return fmt.Sprintf("%#v", p.patterns)
-}
-
-func (p *patternsOption) Set(line string) error {
-	err := json.Unmarshal([]byte(line), &p.patterns)
+func (h *handlerConfig) Set(line string) error {
+	err := json.Unmarshal([]byte(line), h)
 	if err != nil {
 		return fmt.Errorf("Unable to parse value as a JSON object: %s", err.Error())
-	}
-	return nil
-}
-
-type mimeMapOption struct {
-	mimes map[string]string
-}
-
-func (m *mimeMapOption) String() string {
-	return fmt.Sprintf("%#v", m.mimes)
-}
-
-func (m *mimeMapOption) Set(line string) error {
-	err := json.Unmarshal([]byte(line), &m.mimes)
-	if err != nil {
-		return fmt.Errorf("Unable to parse JSON MIMEs map from string: %s", err.Error())
 	}
 	return nil
 }
@@ -121,84 +108,193 @@ func parseHTTPDates(date string) (*time.Time, error) {
 
 // MuxParser parses the tile coordinate from the captured arguments from
 // the gorilla mux router.
-type MuxParser struct{}
+type MuxParser struct {
+	mimeMap map[string]string
+}
+
+type MimeParseError struct {
+	BadFormat string
+}
+
+func (mpe *MimeParseError) Error() string {
+	return fmt.Sprintf("Invalid format: %s", mpe.BadFormat)
+}
+
+type CoordParseError struct {
+	// relevant values are set when parse fails
+	BadZ string
+	BadX string
+	BadY string
+}
+
+func (cpe *CoordParseError) IsError() bool {
+	return cpe.BadZ != "" || cpe.BadX != "" || cpe.BadY != ""
+}
+
+func (cpe *CoordParseError) Error() string {
+	// TODO on multiple parse failures, can return back a concatenated string
+	if cpe.BadZ != "" {
+		return fmt.Sprintf("Invalid z: %s", cpe.BadZ)
+	}
+	if cpe.BadX != "" {
+		return fmt.Sprintf("Invalid x: %s", cpe.BadX)
+	}
+	if cpe.BadY != "" {
+		return fmt.Sprintf("Invalid y: %s", cpe.BadY)
+	}
+	panic("No coord parse error")
+}
+
+type CondParseError struct {
+	IfModifiedSinceError error
+}
+
+func (cpe *CondParseError) Error() string {
+	return cpe.IfModifiedSinceError.Error()
+}
+
+type ParseError struct {
+	MimeError  *MimeParseError
+	CoordError *CoordParseError
+	CondError  *CondParseError
+}
+
+func (pe *ParseError) Error() string {
+	if pe.MimeError != nil {
+		return pe.MimeError.Error()
+	} else if pe.CoordError != nil {
+		return pe.CoordError.Error()
+	} else if pe.CondError != nil {
+		return pe.CondError.Error()
+	} else {
+		panic("ParseError: No error")
+	}
+}
 
 // Parse ignores its argument and uses values from the capture.
-func (_ *MuxParser) Parse(req *http.Request) (t tapalcatl.TileCoord, c Condition, err error) {
+func (mp *MuxParser) Parse(req *http.Request) (*ParseResult, error) {
 	m := mux.Vars(req)
 
-	t.Z, err = strconv.Atoi(m["z"])
-	if err != nil {
-		return
-	}
-
-	t.X, err = strconv.Atoi(m["x"])
-	if err != nil {
-		return
-	}
-
-	t.Y, err = strconv.Atoi(m["y"])
-	if err != nil {
-		return
-	}
+	var t tapalcatl.TileCoord
+	var contentType string
+	var err error
+	var ok bool
 
 	t.Format = m["fmt"]
-
-	if_modified_since := req.Header.Get("If-Modified-Since")
-	if if_modified_since != "" {
-		c.IfModifiedSince, err = parseHTTPDates(if_modified_since)
-		if err != nil {
-			return
+	if contentType, ok = mp.mimeMap[t.Format]; !ok {
+		return nil, &ParseError{
+			MimeError: &MimeParseError{
+				BadFormat: t.Format,
+			},
 		}
 	}
 
-	if_none_match := req.Header.Get("If-None-Match")
-	if if_none_match != "" {
-		c.IfNoneMatch = &if_none_match
+	var coordError CoordParseError
+	z := m["z"]
+	t.Z, err = strconv.Atoi(z)
+	if err != nil {
+		coordError.BadZ = z
 	}
 
-	return
+	x := m["x"]
+	t.X, err = strconv.Atoi(x)
+	if err != nil {
+		coordError.BadX = x
+	}
+
+	y := m["y"]
+	t.Y, err = strconv.Atoi(y)
+	if err != nil {
+		coordError.BadY = y
+	}
+
+	if coordError.IsError() {
+		return nil, &ParseError{
+			CoordError: &coordError,
+		}
+	}
+
+	var condition Condition
+	var condError CondParseError
+
+	ifNoneMatch := req.Header.Get("If-None-Match")
+	if ifNoneMatch != "" {
+		condition.IfNoneMatch = &ifNoneMatch
+	}
+
+	parseResult := ParseResult{
+		Coord:       t,
+		Cond:        condition,
+		ContentType: contentType,
+	}
+
+	ifModifiedSince := req.Header.Get("If-Modified-Since")
+	if ifModifiedSince != "" {
+		parseResult.Cond.IfModifiedSince, err = parseHTTPDates(ifModifiedSince)
+		if err != nil {
+			condError.IfModifiedSinceError = err
+			return &parseResult, &ParseError{
+				CondError: &condError,
+			}
+		}
+	}
+
+	return &parseResult, nil
 }
 
-func copyHeader(new_headers http.Header, key string, old_headers http.Header) {
-	val := old_headers.Get(key)
-	if val != "" {
-		new_headers.Set(key, val)
-	}
+type OnDemandBufferManager struct{}
+
+func (bm *OnDemandBufferManager) Get() *bytes.Buffer {
+	return &bytes.Buffer{}
+}
+
+func (bm *OnDemandBufferManager) Put(buf *bytes.Buffer) {
 }
 
 func main() {
-	var listen, healthcheck, debug_host string
-	var poolSize, poolWidth int
-	patterns := patternsOption{patterns: make(map[string]*patternConfig)}
-	mime_map := mimeMapOption{mimes: make(map[string]string)}
+	var listen, healthcheck, debugHost string
+	var poolNumEntries, poolEntrySize int
+	hc := handlerConfig{}
 
 	// use this logger everywhere.
-	logger := log.New(os.Stdout, "tapalcatl", log.LstdFlags)
+	logger := log.New(os.Stdout, "tapalcatl ", log.LstdFlags)
 
 	f := flag.NewFlagSetWithEnvPrefix(os.Args[0], "TAPALCATL", 0)
-	f.Var(&patterns, "patterns",
-		`JSON object of patterns to use when matching incoming tile requests, each pattern should map to an object containing:
-	S3 {                  Object present when the storage should be from S3.
-	  Bucket     string   Name of S3 bucket to fetch from.
-	  KeyPattern string   Pattern to fill with variables from the main pattern to make the S3 key.
-	  Prefix     string   Prefix to use in this bucket.
-	  Region     string   AWS region to connect to.
-	}
-	File {                Object present when the storage should be from disk.
-	  BaseDir    string   Base directory to look for files under.
-	}
-	Layer        string   Name of layer to use in this bucket.
-	ProxyURL     url.URL  URL to proxy requests to. The path part is ignored.
-	MetatileSize int      Number of tiles in each dimension of the metatile.
+	f.Var(&hc, "handler",
+		`JSON object defining how request patterns will be handled.
+	 Aws { Object present when Aws-wide configuration is needed, eg session config.
+     Region string Name of aws region
+   }
+   Storage { key -> storage definition mapping
+     storage name (type) string -> {
+     	 MetatileSize int      Number of tiles in each dimension of the metatile.
+
+       (s3 storage)
+    	 Layer      string   Name of layer to use in this bucket. Only relevant for s3.
+    	 Bucket     string   Name of S3 bucket to fetch from.
+       KeyPattern string   Pattern to fill with variables from the main pattern to make the S3 key.
+
+       (file storage)
+       BaseDir    string   Base directory to look for files under.
+     }
+   }
+   Pattern { request pattern -> storage configuration mapping
+     request pattern string -> {
+       type string Name of storage defintion to use
+       list of optional storage configuration to use:
+       prefix is required for s3, others are optional overrides of relevant definition
+     	 Prefix string  Prefix to use in this bucket.
+     }
+   }
+   Mime { extension -> content-type used in http response
+   }
 `)
 	f.StringVar(&listen, "listen", ":8080", "interface and port to listen on")
 	f.String("config", "", "Config file to read values from.")
 	f.StringVar(&healthcheck, "healthcheck", "", "A path to respond to with a blank 200 OK. Intended for use by load balancer health checks.")
-	f.StringVar(&debug_host, "debugHost", "", "IP address of remote debug host allowed to read expvars at /debug/vars.")
-	f.Var(&mime_map, "mime", "JSON object mapping file suffixes to MIME types.")
-	f.IntVar(&poolSize, "poolsize", 0, "Number of byte buffers to cache in pool between requests.")
-	f.IntVar(&poolWidth, "poolwidth", 1, "Size of new byte buffers to create in the pool.")
+	f.StringVar(&debugHost, "debugHost", "", "IP address of remote debug host allowed to read expvars at /debug/vars.")
+	f.IntVar(&poolNumEntries, "poolnumentries", 0, "Number of buffers to pool.")
+	f.IntVar(&poolEntrySize, "poolentrysize", 0, "Size of each buffer in pool.")
 
 	err := f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
@@ -207,98 +303,91 @@ func main() {
 		logger.Fatalf("Unable to parse input command line, environment or config: %s", err.Error())
 	}
 
-	if len(patterns.patterns) == 0 {
-		logger.Fatalf("You must provide at least one pattern to proxy.")
+	if len(hc.Pattern) == 0 {
+		logger.Fatalf("You must provide at least one pattern.")
+	}
+	if len(hc.Storage) == 0 {
+		logger.Fatalf("You must provide at least one storage.")
 	}
 
 	r := mux.NewRouter()
 
-	needS3 := false
-	for pattern, cfg := range patterns.patterns {
-		if cfg.S3 != nil {
-			if cfg.File != nil {
-				logger.Fatalf("Only one storage may be configured for each Pattern, but %#v has both S3 and File.", pattern)
-			}
-			needS3 = true
-		} else if cfg.File == nil {
-			logger.Fatalf("No storage configured for pattern %#v.", pattern)
-		}
+	// buffer manager shared by all handlers
+	var bufferManager BufferManager
+
+	if poolNumEntries > 0 && poolEntrySize > 0 {
+		bufferManager = bpool.NewSizedBufferPool(poolNumEntries, poolEntrySize)
+	} else {
+		bufferManager = &OnDemandBufferManager{}
 	}
 
-	var sess *session.Session
-	if needS3 {
+	// set if we have s3 storage configured, and shared across all s3 sessions
+	var awsSession *session.Session
 
-		// ensure that the region configured is the same across all s3 configuration
-		var region *string
-		for _, cfg := range patterns.patterns {
-			if cfg.S3 != nil && cfg.S3.Region != nil {
-				if region != nil && *region != *cfg.S3.Region {
-					logger.Fatalf("Multiple s3 regions configured: %s and %s", *region, *cfg.S3.Region)
-				}
-				region = cfg.S3.Region
+	// create the storage implementations and handler routes for patterns
+	var storage Storage
+	for reqPattern, sc := range hc.Pattern {
+
+		t := sc.Type_
+		sd, ok := hc.Storage[t]
+		if !ok {
+			logger.Fatalf("Missing s3 storage definition: %s", t)
+		}
+		metatileSize := sd.MetatileSize
+		if sc.MetatileSize != nil {
+			metatileSize = *sc.MetatileSize
+		}
+		layer := sd.Layer
+		if sc.Layer != nil {
+			layer = *sc.Layer
+		}
+
+		switch t {
+		case "s3":
+			if sc.Prefix == nil {
+				logger.Fatalf("S3 configuration requires prefix")
 			}
-		}
+			prefix := *sc.Prefix
 
-		// start up the AWS config session. this is safe to share amongst request threads
-		if region == nil {
-			sess, err = session.NewSession()
-		} else {
-			sess, err = session.NewSessionWithOptions(session.Options{
-				Config: aws.Config{Region: region},
-			})
-		}
-		if err != nil {
-			logger.Fatalf("Unable to set up AWS session: %s", err.Error())
-		}
-	}
-
-	bufferPool := bpool.NewBytePool(poolSize, poolWidth)
-
-	for pattern, cfg := range patterns.patterns {
-		parser := &MuxParser{}
-
-		var storage Getter
-		if cfg.S3 != nil {
-			storage = NewS3Storage(s3.New(sess), cfg.S3.Bucket, cfg.S3.KeyPattern, cfg.S3.Prefix, cfg.Layer)
-		} else {
-			storage = NewFileStorage(cfg.File.BaseDir, cfg.Layer)
-		}
-
-		proxy := &httputil.ReverseProxy{
-			Director: func(req *http.Request) {
-				// clear out most of the headers, particularly Host:
-				// but we want to keep the if-modified-since and if-none-match
-				new_headers := make(http.Header)
-				copyHeader(new_headers, "If-Modified-Since", req.Header)
-				copyHeader(new_headers, "If-None-Match", req.Header)
-				copyHeader(new_headers, "X-Forwarded-For", req.Header)
-				copyHeader(new_headers, "X-Real-IP", req.Header)
-				req.Header = new_headers
-
-				// overwrite scheme, user and host. leave query params and fragment as they are in the incoming request. interpolate path.
-				req.URL.Scheme = cfg.ProxyURL.url.Scheme
-				req.URL.Opaque = cfg.ProxyURL.url.Opaque
-				req.URL.User = cfg.ProxyURL.url.User
-				req.URL.Host = cfg.ProxyURL.url.Host
-				req.Host = cfg.ProxyURL.url.Host
-
-				var err error
-				vars := mux.Vars(req)
-				vars["layer"] = cfg.Layer
-				req.URL.Path, err = interpol.WithMap(cfg.ProxyURL.url.Path, vars)
-				if err != nil {
-					// can't return error, can only log.
-					logger.Printf("ERROR: Unable to interpolate string %#v with vars %#v: %s", cfg.ProxyURL.url.Path, vars, err.Error())
+			if awsSession == nil {
+				if hc.Aws != nil && hc.Aws.Region != nil {
+					awsSession, err = session.NewSessionWithOptions(session.Options{
+						Config: aws.Config{Region: hc.Aws.Region},
+					})
+				} else {
+					awsSession, err = session.NewSession()
 				}
-			},
-			ErrorLog:   logger,
-			BufferPool: bufferPool,
+			}
+			if err != nil {
+				logger.Fatalf("Unable to set up AWS session: %s", err.Error())
+			}
+			keyPattern := sd.KeyPattern
+			if sc.KeyPattern != nil {
+				keyPattern = *sc.KeyPattern
+			}
+
+			s3Client := s3.New(awsSession)
+			storage = NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer)
+
+		case "file":
+			sd, ok := hc.Storage[t]
+			if !ok {
+				logger.Fatalf("Missing file storage definition")
+			}
+			storage = NewFileStorage(sd.BaseDir, layer)
+
+		default:
+			logger.Fatalf("Unknown storage %s", t)
 		}
 
-		h := MetatileHandler(parser, cfg.MetatileSize, mime_map.mimes, storage, proxy, logger)
+		parser := &MuxParser{
+			mimeMap: hc.Mime,
+		}
+
+		h := MetatileHandler(parser, metatileSize, hc.Mime, storage, bufferManager, logger)
 		gzipped := gziphandler.GzipHandler(h)
 
-		r.Handle(pattern, gzipped).Methods("GET")
+		r.Handle(reqPattern, gzipped).Methods("GET")
 	}
 
 	if len(healthcheck) > 0 {
@@ -306,7 +395,7 @@ func main() {
 	}
 
 	// serve expvar stats to localhost and debugHost
-	expvar_func, err := stats.HandlerFunc(debug_host)
+	expvar_func, err := stats.HandlerFunc(debugHost)
 	if err != nil {
 		logger.Fatalf("Error initializing stats.HandlerFunc: %s", err.Error())
 	}
@@ -315,5 +404,11 @@ func main() {
 	corsHandler := handlers.CORS()(r)
 	logHandler := handlers.CombinedLoggingHandler(os.Stdout, corsHandler)
 
+	logger.Printf("Server started and listening on %s\n", listen)
+
 	logger.Fatal(http.ListenAndServe(listen, logHandler))
+}
+
+func getHealth(rw http.ResponseWriter, _ *http.Request) {
+	rw.WriteHeader(200)
 }
