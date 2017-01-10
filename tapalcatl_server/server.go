@@ -300,14 +300,14 @@ func main() {
 	if err == flag.ErrHelp {
 		return
 	} else if err != nil {
-		logger.Fatalf("Unable to parse input command line, environment or config: %s", err.Error())
+		logger.Fatalf("ERROR: Unable to parse input command line, environment or config: %s", err.Error())
 	}
 
 	if len(hc.Pattern) == 0 {
-		logger.Fatalf("You must provide at least one pattern.")
+		logger.Fatalf("ERROR: You must provide at least one pattern.")
 	}
 	if len(hc.Storage) == 0 {
-		logger.Fatalf("You must provide at least one storage.")
+		logger.Fatalf("ERROR: You must provide at least one storage.")
 	}
 
 	r := mux.NewRouter()
@@ -331,7 +331,7 @@ func main() {
 		t := sc.Type_
 		sd, ok := hc.Storage[t]
 		if !ok {
-			logger.Fatalf("Missing s3 storage definition: %s", t)
+			logger.Fatalf("ERROR: Missing storage definition: %s", t)
 		}
 		metatileSize := sd.MetatileSize
 		if sc.MetatileSize != nil {
@@ -341,11 +341,14 @@ func main() {
 		if sc.Layer != nil {
 			layer = *sc.Layer
 		}
+		if layer == "" {
+			logger.Fatalf("ERROR: Missing layer for storage: %s", t)
+		}
 
 		switch t {
 		case "s3":
 			if sc.Prefix == nil {
-				logger.Fatalf("S3 configuration requires prefix")
+				logger.Fatalf("ERROR: S3 configuration requires prefix")
 			}
 			prefix := *sc.Prefix
 
@@ -359,11 +362,18 @@ func main() {
 				}
 			}
 			if err != nil {
-				logger.Fatalf("Unable to set up AWS session: %s", err.Error())
+				logger.Fatalf("ERROR: Unable to set up AWS session: %s", err.Error())
 			}
 			keyPattern := sd.KeyPattern
 			if sc.KeyPattern != nil {
 				keyPattern = *sc.KeyPattern
+			}
+
+			if sd.Bucket == "" {
+				logger.Fatalf("ERROR: S3 storage missing bucket configuration")
+			}
+			if keyPattern == "" {
+				logger.Fatalf("ERROR: S3 storage missing key pattern")
 			}
 
 			s3Client := s3.New(awsSession)
@@ -372,12 +382,17 @@ func main() {
 		case "file":
 			sd, ok := hc.Storage[t]
 			if !ok {
-				logger.Fatalf("Missing file storage definition")
+				logger.Fatalf("ERROR: Missing file storage definition")
 			}
+
+			if sd.BaseDir == "" {
+				logger.Fatalf("ERROR: File storage missing base dir")
+			}
+
 			storage = NewFileStorage(sd.BaseDir, layer)
 
 		default:
-			logger.Fatalf("Unknown storage %s", t)
+			logger.Fatalf("ERROR: Unknown storage %s", t)
 		}
 
 		parser := &MuxParser{
@@ -397,14 +412,14 @@ func main() {
 	// serve expvar stats to localhost and debugHost
 	expvar_func, err := stats.HandlerFunc(debugHost)
 	if err != nil {
-		logger.Fatalf("Error initializing stats.HandlerFunc: %s", err.Error())
+		logger.Fatalf("ERROR: Failed to initialize stats.HandlerFunc: %s", err.Error())
 	}
 	r.HandleFunc("/debug/vars", expvar_func).Methods("GET")
 
 	corsHandler := handlers.CORS()(r)
 	logHandler := handlers.CombinedLoggingHandler(os.Stdout, corsHandler)
 
-	logger.Printf("Server started and listening on %s\n", listen)
+	logger.Printf("INFO: Server started and listening on %s\n", listen)
 
 	logger.Fatal(http.ListenAndServe(listen, logHandler))
 }

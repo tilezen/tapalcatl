@@ -161,7 +161,7 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 			updateCounters(time.Since(start_time))
 
 			// relies on the Stringer implementation to format the record correctly
-			logger.Printf("%s", &logState)
+			logger.Printf("INFO: %s", &logState)
 
 		}()
 
