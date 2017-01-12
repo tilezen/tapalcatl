@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/pubnub/go-metrics-statsd"
+	"github.com/rcrowley/go-metrics"
 	"github.com/tilezen/tapalcatl"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -38,6 +41,7 @@ const (
 	ResponseState_NotFound
 	ResponseState_BadRequest
 	ResponseState_Error
+	ResponseState_Count
 )
 
 func (rrs reqResponseState) String() string {
@@ -67,6 +71,7 @@ const (
 	FetchState_NotFound
 	FetchState_FetchError
 	FetchState_ReadError
+	FetchState_Count
 )
 
 func (rfs reqFetchState) String() string {
@@ -149,7 +154,110 @@ func (reqState *requestState) String() string {
 	return result
 }
 
-func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, logger *log.Logger) http.Handler {
+type metricsWriter interface {
+	Write(*requestState)
+}
+
+type nilMetricsWriter struct{}
+
+func (_ *nilMetricsWriter) Write(reqState *requestState) {}
+
+type statsdMetricsWriter struct {
+	respState  [ResponseState_Count]metrics.Counter
+	fetchState [FetchState_Count]metrics.Counter
+
+	fetchSizeBody metrics.Gauge
+	fetchSizeLen  metrics.Gauge
+	fetchSizeCap  metrics.Gauge
+
+	lastMod metrics.Counter
+	etag    metrics.Counter
+
+	zipErr       metrics.Counter
+	respWriteErr metrics.Counter
+	condErr      metrics.Counter
+}
+
+func (smw *statsdMetricsWriter) Write(reqState *requestState) {
+	respStateInt := int(reqState.responseState)
+	if respStateInt > 0 && respStateInt < int(ResponseState_Count) {
+		counter := smw.respState[respStateInt]
+		counter.Inc(1)
+	}
+
+	fetchStateInt := int(reqState.fetchState)
+	if fetchStateInt > 0 && fetchStateInt < int(FetchState_Count) {
+		counter := smw.fetchState[fetchStateInt]
+		counter.Inc(1)
+	}
+
+	if reqState.fetchSize.bodySize > 0 {
+		smw.fetchSizeBody.Update(reqState.fetchSize.bodySize)
+		smw.fetchSizeLen.Update(reqState.fetchSize.bytesLength)
+		smw.fetchSizeCap.Update(reqState.fetchSize.bytesCap)
+	}
+
+	if reqState.storageMetadata.hasLastModified {
+		smw.lastMod.Inc(1)
+	}
+	if reqState.storageMetadata.hasEtag {
+		smw.etag.Inc(1)
+	}
+
+	if reqState.isZipError {
+		smw.zipErr.Inc(1)
+	}
+	if reqState.isResponseWriteError {
+		smw.respWriteErr.Inc(1)
+	}
+	if reqState.isCondError {
+		smw.condErr.Inc(1)
+	}
+}
+
+func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, duration time.Duration) metricsWriter {
+
+	result := &statsdMetricsWriter{}
+
+	registry := metrics.DefaultRegistry
+
+	// set up response state counters
+	for i := 1; i < int(ResponseState_Count); i += 1 {
+		rrs := reqResponseState(i)
+		stateName := rrs.String()
+		metricName := fmt.Sprintf("responsestate.%s", stateName)
+		result.respState[i] = metrics.NewRegisteredCounter(metricName, registry)
+	}
+
+	// set up fetch state counters
+	for i := 1; i < int(FetchState_Count); i += 1 {
+		rfs := reqFetchState(i)
+		stateName := rfs.String()
+		metricName := fmt.Sprintf("fetchstate.%s", stateName)
+		result.fetchState[i] = metrics.NewRegisteredCounter(metricName, registry)
+	}
+
+	// fetch sizes
+	result.fetchSizeBody = metrics.NewRegisteredGauge("fetchsize.body-size", registry)
+	result.fetchSizeLen = metrics.NewRegisteredGauge("fetchsize.buffer-length", registry)
+	result.fetchSizeCap = metrics.NewRegisteredGauge("fetchsize.buffer-capacity", registry)
+
+	// storage response metadata counters
+	result.lastMod = metrics.NewRegisteredCounter("lastmodified", registry)
+	result.etag = metrics.NewRegisteredCounter("etag", registry)
+
+	// error counters
+	result.zipErr = metrics.NewRegisteredCounter("zip-error", registry)
+	result.respWriteErr = metrics.NewRegisteredCounter("response-write-error", registry)
+	result.condErr = metrics.NewRegisteredCounter("condition-parse-error", registry)
+
+	// this goroutine ticks at the specified duration and sends out the data
+	go statsd.StatsD(registry, duration, metricsPrefix, addr)
+
+	return result
+}
+
+func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger *log.Logger) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 
@@ -158,10 +266,14 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 		numRequests.Add(1)
 		start_time := time.Now()
 		defer func() {
+			// update expvar state
 			updateCounters(time.Since(start_time))
 
 			// relies on the Stringer implementation to format the record correctly
 			logger.Printf("INFO: %s", &reqState)
+
+			// write out metrics
+			mw.Write(&reqState)
 
 		}()
 

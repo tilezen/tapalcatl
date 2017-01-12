@@ -15,6 +15,7 @@ import (
 	"github.com/tilezen/tapalcatl"
 	"github.com/whosonfirst/go-httpony/stats"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -254,6 +255,9 @@ func (bm *OnDemandBufferManager) Put(buf *bytes.Buffer) {
 func main() {
 	var listen, healthcheck, debugHost string
 	var poolNumEntries, poolEntrySize int
+	var metricsStatsdAddr, metricsStatsdPrefix string
+	var metricsInterval int
+
 	hc := handlerConfig{}
 
 	// use this logger everywhere.
@@ -293,8 +297,13 @@ func main() {
 	f.String("config", "", "Config file to read values from.")
 	f.StringVar(&healthcheck, "healthcheck", "", "A path to respond to with a blank 200 OK. Intended for use by load balancer health checks.")
 	f.StringVar(&debugHost, "debugHost", "", "IP address of remote debug host allowed to read expvars at /debug/vars.")
+
 	f.IntVar(&poolNumEntries, "poolnumentries", 0, "Number of buffers to pool.")
 	f.IntVar(&poolEntrySize, "poolentrysize", 0, "Size of each buffer in pool.")
+
+	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
+	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
+	f.IntVar(&metricsInterval, "metrics-interval", 5, "Period in seconds to send metrics data")
 
 	err := f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
@@ -319,6 +328,22 @@ func main() {
 		bufferManager = bpool.NewSizedBufferPool(poolNumEntries, poolEntrySize)
 	} else {
 		bufferManager = &OnDemandBufferManager{}
+	}
+
+	// metrics writer configuration
+	var mw metricsWriter
+	if metricsStatsdAddr != "" {
+		if metricsInterval <= 0 {
+			logger.Fatalf("ERROR: metrics interval should be greater than 0")
+		}
+		udpAddr, err := net.ResolveUDPAddr("udp4", metricsStatsdAddr)
+		if err != nil {
+			logger.Fatalf("ERROR: Invalid metricsstatsdaddr %s: %s", metricsStatsdAddr, err)
+		}
+		metricsIntervalDuration := time.Second * time.Duration(metricsInterval)
+		mw = NewStatsdMetricsWriter(udpAddr, metricsStatsdPrefix, metricsIntervalDuration)
+	} else {
+		mw = &nilMetricsWriter{}
 	}
 
 	// set if we have s3 storage configured, and shared across all s3 sessions
@@ -399,7 +424,7 @@ func main() {
 			mimeMap: hc.Mime,
 		}
 
-		h := MetatileHandler(parser, metatileSize, hc.Mime, storage, bufferManager, logger)
+		h := MetatileHandler(parser, metatileSize, hc.Mime, storage, bufferManager, mw, logger)
 		gzipped := gziphandler.GzipHandler(h)
 
 		r.Handle(reqPattern, gzipped).Methods("GET")
