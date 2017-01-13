@@ -179,14 +179,14 @@ type statsdMetricsWriter struct {
 }
 
 func (smw *statsdMetricsWriter) Write(reqState *requestState) {
-	respStateInt := int(reqState.responseState)
-	if respStateInt > 0 && respStateInt < int(ResponseState_Count) {
+	respStateInt := int32(reqState.responseState)
+	if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
 		counter := smw.respState[respStateInt]
 		counter.Inc(1)
 	}
 
-	fetchStateInt := int(reqState.fetchState)
-	if fetchStateInt > 0 && fetchStateInt < int(FetchState_Count) {
+	fetchStateInt := int32(reqState.fetchState)
+	if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
 		counter := smw.fetchState[fetchStateInt]
 		counter.Inc(1)
 	}
