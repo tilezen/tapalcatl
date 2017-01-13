@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/pubnub/go-metrics-statsd"
+	"github.com/rcrowley/go-metrics"
 	"github.com/tilezen/tapalcatl"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -25,23 +28,24 @@ type BufferManager interface {
 	Put(*bytes.Buffer)
 }
 
-// the logState structures and string generation serve to emit a single log entry line
+// the reqState structures and string generation serve to emit a single log entry line
 // a log parser will pick this up and use it to persist metrics
 // the string functions here are specific to the format used and should be updated with care
 
-type logResponseState int32
+type reqResponseState int32
 
 const (
-	ResponseState_Nil logResponseState = iota
+	ResponseState_Nil reqResponseState = iota
 	ResponseState_Success
 	ResponseState_NotModified
 	ResponseState_NotFound
 	ResponseState_BadRequest
 	ResponseState_Error
+	ResponseState_Count
 )
 
-func (lrs logResponseState) String() string {
-	switch lrs {
+func (rrs reqResponseState) String() string {
+	switch rrs {
 	case ResponseState_Nil:
 		return "nil"
 	case ResponseState_Success:
@@ -59,18 +63,19 @@ func (lrs logResponseState) String() string {
 	}
 }
 
-type logFetchState int32
+type reqFetchState int32
 
 const (
-	FetchState_Nil logFetchState = iota
+	FetchState_Nil reqFetchState = iota
 	FetchState_Success
 	FetchState_NotFound
 	FetchState_FetchError
 	FetchState_ReadError
+	FetchState_Count
 )
 
-func (lfs logFetchState) String() string {
-	switch lfs {
+func (rfs reqFetchState) String() string {
+	switch rfs {
 	case FetchState_Nil:
 		return "nil"
 	case FetchState_Success:
@@ -86,19 +91,19 @@ func (lfs logFetchState) String() string {
 	}
 }
 
-type logFetchSize struct {
+type reqFetchSize struct {
 	bodySize, bytesLength, bytesCap int64
 }
 
-type logStorageMetadata struct {
+type reqStorageMetadata struct {
 	hasLastModified, hasEtag bool
 }
 
-type logEntryState struct {
-	responseState        logResponseState
-	fetchState           logFetchState
-	fetchSize            logFetchSize
-	storageMetadata      logStorageMetadata
+type requestState struct {
+	responseState        reqResponseState
+	fetchState           reqFetchState
+	fetchSize            reqFetchSize
+	storageMetadata      reqStorageMetadata
 	isZipError           bool
 	isResponseWriteError bool
 	isCondError          bool
@@ -113,31 +118,31 @@ func logBool(x bool) string {
 }
 
 // create a log string
-func (logState *logEntryState) String() string {
+func (reqState *requestState) String() string {
 
 	var fetchSize string
-	if logState.fetchSize.bodySize > 0 {
+	if reqState.fetchSize.bodySize > 0 {
 		fetchSize = fmt.Sprintf(
 			"%d %d %d",
-			logState.fetchSize.bodySize,
-			logState.fetchSize.bytesLength,
-			logState.fetchSize.bytesCap,
+			reqState.fetchSize.bodySize,
+			reqState.fetchSize.bytesLength,
+			reqState.fetchSize.bytesCap,
 		)
 	} else {
 		fetchSize = "nil"
 	}
 
-	hasLastMod := logBool(logState.storageMetadata.hasLastModified)
-	hasEtag := logBool(logState.storageMetadata.hasEtag)
+	hasLastMod := logBool(reqState.storageMetadata.hasLastModified)
+	hasEtag := logBool(reqState.storageMetadata.hasEtag)
 
-	isZipErr := logBool(logState.isZipError)
-	isRespErr := logBool(logState.isResponseWriteError)
-	isCondErr := logBool(logState.isCondError)
+	isZipErr := logBool(reqState.isZipError)
+	isRespErr := logBool(reqState.isResponseWriteError)
+	isCondErr := logBool(reqState.isCondError)
 
 	result := fmt.Sprintf(
 		"METRICS: respstate(%s) fetchstate(%s) fetchsize(%s) ziperr(%s) resperr(%s) conderr(%s) lastmod(%s) etag(%s)",
-		logState.responseState,
-		logState.fetchState,
+		reqState.responseState,
+		reqState.fetchState,
 		fetchSize,
 		isZipErr,
 		isRespErr,
@@ -149,19 +154,130 @@ func (logState *logEntryState) String() string {
 	return result
 }
 
-func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, logger *log.Logger) http.Handler {
+type metricsWriter interface {
+	Write(*requestState)
+}
+
+type nilMetricsWriter struct{}
+
+func (_ *nilMetricsWriter) Write(reqState *requestState) {}
+
+type statsdMetricsWriter struct {
+	respState  [ResponseState_Count]metrics.Counter
+	fetchState [FetchState_Count]metrics.Counter
+
+	fetchSizeBody metrics.Gauge
+	fetchSizeLen  metrics.Gauge
+	fetchSizeCap  metrics.Gauge
+
+	lastMod metrics.Counter
+	etag    metrics.Counter
+
+	zipErr       metrics.Counter
+	respWriteErr metrics.Counter
+	condErr      metrics.Counter
+}
+
+func (smw *statsdMetricsWriter) Write(reqState *requestState) {
+	respStateInt := int32(reqState.responseState)
+	if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
+		counter := smw.respState[respStateInt]
+		counter.Inc(1)
+	}
+
+	fetchStateInt := int32(reqState.fetchState)
+	if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
+		counter := smw.fetchState[fetchStateInt]
+		counter.Inc(1)
+	}
+
+	if reqState.fetchSize.bodySize > 0 {
+		smw.fetchSizeBody.Update(reqState.fetchSize.bodySize)
+		smw.fetchSizeLen.Update(reqState.fetchSize.bytesLength)
+		smw.fetchSizeCap.Update(reqState.fetchSize.bytesCap)
+	}
+
+	if reqState.storageMetadata.hasLastModified {
+		smw.lastMod.Inc(1)
+	}
+	if reqState.storageMetadata.hasEtag {
+		smw.etag.Inc(1)
+	}
+
+	if reqState.isZipError {
+		smw.zipErr.Inc(1)
+	}
+	if reqState.isResponseWriteError {
+		smw.respWriteErr.Inc(1)
+	}
+	if reqState.isCondError {
+		smw.condErr.Inc(1)
+	}
+}
+
+func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, duration time.Duration) metricsWriter {
+
+	result := &statsdMetricsWriter{}
+
+	registry := metrics.DefaultRegistry
+
+	// set up response state counters
+	for i := 1; i < int(ResponseState_Count); i += 1 {
+		rrs := reqResponseState(i)
+		stateName := rrs.String()
+		metricName := fmt.Sprintf("responsestate.%s", stateName)
+		result.respState[i] = metrics.NewRegisteredCounter(metricName, registry)
+	}
+
+	// set up fetch state counters
+	for i := 1; i < int(FetchState_Count); i += 1 {
+		rfs := reqFetchState(i)
+		stateName := rfs.String()
+		metricName := fmt.Sprintf("fetchstate.%s", stateName)
+		result.fetchState[i] = metrics.NewRegisteredCounter(metricName, registry)
+	}
+
+	// fetch sizes
+	result.fetchSizeBody = metrics.NewRegisteredGauge("fetchsize.body-size", registry)
+	result.fetchSizeLen = metrics.NewRegisteredGauge("fetchsize.buffer-length", registry)
+	result.fetchSizeCap = metrics.NewRegisteredGauge("fetchsize.buffer-capacity", registry)
+
+	// storage response metadata counters
+	result.lastMod = metrics.NewRegisteredCounter("lastmodified", registry)
+	result.etag = metrics.NewRegisteredCounter("etag", registry)
+
+	// error counters
+	result.zipErr = metrics.NewRegisteredCounter("zip-error", registry)
+	result.respWriteErr = metrics.NewRegisteredCounter("response-write-error", registry)
+	result.condErr = metrics.NewRegisteredCounter("condition-parse-error", registry)
+
+	// this goroutine ticks at the specified duration and sends out the data
+	go statsd.StatsD(registry, duration, metricsPrefix, addr)
+
+	return result
+}
+
+func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger *log.Logger) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 
-		logState := logEntryState{}
+		reqState := requestState{}
 
 		numRequests.Add(1)
 		start_time := time.Now()
 		defer func() {
+			// update expvar state
 			updateCounters(time.Since(start_time))
 
+			if reqState.responseState == ResponseState_Nil {
+				logger.Printf("ERROR: Code error: handler did not set response state")
+			}
+
 			// relies on the Stringer implementation to format the record correctly
-			logger.Printf("INFO: %s", &logState)
+			logger.Printf("INFO: %s", &reqState)
+
+			// write out metrics
+			mw.Write(&reqState)
 
 		}()
 
@@ -175,21 +291,21 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 				logger.Printf("WARNING: Parse failure: %s", err.Error())
 				if pe.MimeError != nil {
 					sc = http.StatusNotFound
-					logState.responseState = ResponseState_NotFound
+					reqState.responseState = ResponseState_NotFound
 					response = pe.MimeError.Error()
 				} else if pe.CoordError != nil {
 					sc = http.StatusBadRequest
-					logState.responseState = ResponseState_BadRequest
+					reqState.responseState = ResponseState_BadRequest
 					response = pe.CoordError.Error()
 				} else if pe.CondError != nil {
-					logState.isCondError = true
+					reqState.isCondError = true
 					logger.Printf("WARNING: Condition Error: %s", pe.CondError)
 				}
 			} else {
 				logger.Printf("ERROR: Unknown parse error: %#v\n", err)
 				sc = http.StatusInternalServerError
 				response = "Internal server error"
-				logState.responseState = ResponseState_Error
+				reqState.responseState = ResponseState_Error
 			}
 
 			// only return an error response when not a condition parse error
@@ -209,23 +325,23 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 				storageFetchErrors.Add(1)
 				logger.Printf("WARNING: Metatile storage fetch failure: %s", err.Error())
 				http.Error(rw, err.Error(), http.StatusInternalServerError)
-				logState.fetchState = FetchState_FetchError
-				logState.responseState = ResponseState_Error
+				reqState.fetchState = FetchState_FetchError
+				reqState.responseState = ResponseState_Error
 			} else {
 				numStorageMisses.Add(1)
 				http.NotFound(rw, req)
-				logState.fetchState = FetchState_NotFound
-				logState.responseState = ResponseState_NotFound
+				reqState.fetchState = FetchState_NotFound
+				reqState.responseState = ResponseState_NotFound
 			}
 			return
 		}
 		numStorageHits.Add(1)
-		logState.fetchState = FetchState_Success
+		reqState.fetchState = FetchState_Success
 
 		if storageResult.NotModified {
 			numStorageNotModified.Add(1)
 			rw.WriteHeader(http.StatusNotModified)
-			logState.responseState = ResponseState_NotModified
+			reqState.responseState = ResponseState_NotModified
 			return
 		}
 		numStorageReads.Add(1)
@@ -243,27 +359,27 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 			storageReadErrors.Add(1)
 			logger.Printf("ERROR: Failed to read storage body: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
-			logState.fetchState = FetchState_ReadError
-			logState.responseState = ResponseState_Error
+			reqState.fetchState = FetchState_ReadError
+			reqState.responseState = ResponseState_Error
 			return
 		}
-		logState.fetchState = FetchState_Success
+		reqState.fetchState = FetchState_Success
 
 		storageBytes := buf.Bytes()
-		logState.fetchSize.bodySize = bodySize
-		logState.fetchSize.bytesLength = int64(len(storageBytes))
-		logState.fetchSize.bytesCap = int64(cap(storageBytes))
+		reqState.fetchSize.bodySize = bodySize
+		reqState.fetchSize.bytesLength = int64(len(storageBytes))
+		reqState.fetchSize.bytesCap = int64(cap(storageBytes))
 
 		headers := rw.Header()
 		headers.Set("Content-Type", parseResult.ContentType)
 		if lastMod := storageResp.LastModified; lastMod != nil {
 			lastModifiedFormatted := lastMod.Format(time.RFC1123Z)
 			headers.Set("Last-Modified", lastModifiedFormatted)
-			logState.storageMetadata.hasLastModified = true
+			reqState.storageMetadata.hasLastModified = true
 		}
 		if etag := storageResp.ETag; etag != nil {
 			headers.Set("ETag", *etag)
-			logState.storageMetadata.hasEtag = true
+			reqState.storageMetadata.hasEtag = true
 		}
 
 		reader, err := tapalcatl.NewMetatileReader(offset, bytes.NewReader(storageBytes), bodySize)
@@ -271,18 +387,18 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 			metatileReadErrors.Add(1)
 			logger.Printf("ERROR: Failed to read metatile: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
-			logState.isZipError = true
-			logState.responseState = ResponseState_Error
+			reqState.isZipError = true
+			reqState.responseState = ResponseState_Error
 			return
 		}
 
 		rw.WriteHeader(http.StatusOK)
-		logState.responseState = ResponseState_Success
+		reqState.responseState = ResponseState_Success
 		_, err = io.Copy(rw, reader)
 		if err != nil {
 			responseWriteErrors.Add(1)
 			logger.Printf("ERROR: Failed to write response body: %s", err.Error())
-			logState.isResponseWriteError = true
+			reqState.isResponseWriteError = true
 		}
 	})
 }
