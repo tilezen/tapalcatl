@@ -269,6 +269,10 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 			// update expvar state
 			updateCounters(time.Since(start_time))
 
+			if reqState.responseState == ResponseState_Nil {
+				logger.Printf("ERROR: Code error: handler did not set response state")
+			}
+
 			// relies on the Stringer implementation to format the record correctly
 			logger.Printf("INFO: %s", &reqState)
 
