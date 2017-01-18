@@ -256,7 +256,6 @@ func main() {
 	var listen, healthcheck, debugHost string
 	var poolNumEntries, poolEntrySize int
 	var metricsStatsdAddr, metricsStatsdPrefix string
-	var metricsInterval int
 
 	hc := handlerConfig{}
 
@@ -303,7 +302,6 @@ func main() {
 
 	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
 	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
-	f.IntVar(&metricsInterval, "metrics-interval", 5, "Period in seconds to send metrics data")
 
 	err := f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
@@ -333,15 +331,11 @@ func main() {
 	// metrics writer configuration
 	var mw metricsWriter
 	if metricsStatsdAddr != "" {
-		if metricsInterval <= 0 {
-			logger.Fatalf("ERROR: metrics interval should be greater than 0")
-		}
 		udpAddr, err := net.ResolveUDPAddr("udp4", metricsStatsdAddr)
 		if err != nil {
 			logger.Fatalf("ERROR: Invalid metricsstatsdaddr %s: %s", metricsStatsdAddr, err)
 		}
-		metricsIntervalDuration := time.Second * time.Duration(metricsInterval)
-		mw = NewStatsdMetricsWriter(udpAddr, metricsStatsdPrefix, metricsIntervalDuration)
+		mw = NewStatsdMetricsWriter(udpAddr, metricsStatsdPrefix, logger)
 	} else {
 		mw = &nilMetricsWriter{}
 	}

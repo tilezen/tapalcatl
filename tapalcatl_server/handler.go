@@ -1,10 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/pubnub/go-metrics-statsd"
-	"github.com/rcrowley/go-metrics"
 	"github.com/tilezen/tapalcatl"
 	"io"
 	"log"
@@ -117,6 +116,14 @@ func logBool(x bool) string {
 	}
 }
 
+func boolAsInt(x bool) int {
+	if x {
+		return 1
+	} else {
+		return 0
+	}
+}
+
 // create a log string
 func (reqState *requestState) String() string {
 
@@ -163,98 +170,88 @@ type nilMetricsWriter struct{}
 func (_ *nilMetricsWriter) Write(reqState *requestState) {}
 
 type statsdMetricsWriter struct {
-	respState  [ResponseState_Count]metrics.Counter
-	fetchState [FetchState_Count]metrics.Counter
+	addr   *net.UDPAddr
+	prefix string
+	logger *log.Logger
+}
 
-	fetchSizeBody metrics.Gauge
-	fetchSizeLen  metrics.Gauge
-	fetchSizeCap  metrics.Gauge
+func makeMetricPrefix(prefix string, metric string) string {
+	if prefix == "" {
+		return metric
+	} else {
+		return fmt.Sprintf("%s.%s", prefix, metric)
+	}
+}
 
-	lastMod metrics.Counter
-	etag    metrics.Counter
+func makeStatsdLineCount(prefix string, metric string, value int) string {
+	return fmt.Sprintf("%s.count:%d|c\n", makeMetricPrefix(prefix, metric), value)
+}
 
-	zipErr       metrics.Counter
-	respWriteErr metrics.Counter
-	condErr      metrics.Counter
+func makeStatsdLineGauge(prefix string, metric string, value int) string {
+	return fmt.Sprintf("%s.value:%d|g\n", makeMetricPrefix(prefix, metric), value)
+}
+
+func writeStatsdCount(w io.Writer, prefix string, metric string, value int) {
+	w.Write([]byte(makeStatsdLineCount(prefix, metric, value)))
+}
+
+func writeStatsdGauge(w io.Writer, prefix string, metric string, value int) {
+	w.Write([]byte(makeStatsdLineGauge(prefix, metric, value)))
 }
 
 func (smw *statsdMetricsWriter) Write(reqState *requestState) {
-	respStateInt := int32(reqState.responseState)
-	if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
-		counter := smw.respState[respStateInt]
-		counter.Inc(1)
-	}
+	go func() {
 
-	fetchStateInt := int32(reqState.fetchState)
-	if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
-		counter := smw.fetchState[fetchStateInt]
-		counter.Inc(1)
-	}
+		conn, err := net.DialUDP("udp", nil, smw.addr)
+		if err != nil {
+			smw.logger.Printf("ERROR: Metrics Writer failed to connect to %s: %s\n", smw.addr, err)
+		}
+		defer conn.Close()
 
-	if reqState.fetchSize.bodySize > 0 {
-		smw.fetchSizeBody.Update(reqState.fetchSize.bodySize)
-		smw.fetchSizeLen.Update(reqState.fetchSize.bytesLength)
-		smw.fetchSizeCap.Update(reqState.fetchSize.bytesCap)
-	}
+		w := bufio.NewWriter(conn)
 
-	if reqState.storageMetadata.hasLastModified {
-		smw.lastMod.Inc(1)
-	}
-	if reqState.storageMetadata.hasEtag {
-		smw.etag.Inc(1)
-	}
+		respStateInt := int32(reqState.responseState)
+		if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
+			respStateName := reqState.responseState.String()
+			respMetricName := fmt.Sprintf("responsestate.%s", respStateName)
+			writeStatsdCount(w, smw.prefix, respMetricName, 1)
+		} else {
+			smw.logger.Printf("ERROR: Invalid response state: %s", reqState.responseState)
+		}
 
-	if reqState.isZipError {
-		smw.zipErr.Inc(1)
-	}
-	if reqState.isResponseWriteError {
-		smw.respWriteErr.Inc(1)
-	}
-	if reqState.isCondError {
-		smw.condErr.Inc(1)
-	}
+		fetchStateInt := int32(reqState.fetchState)
+		if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
+			fetchStateName := reqState.fetchState.String()
+			fetchMetricName := fmt.Sprintf("fetchstate.%s", fetchStateName)
+			writeStatsdCount(w, smw.prefix, fetchMetricName, 1)
+		} else {
+			smw.logger.Printf("ERROR: Invalid fetch state: %s", reqState.responseState)
+		}
+
+		if reqState.fetchSize.bodySize > 0 {
+			writeStatsdGauge(w, smw.prefix, "fetchsize.body-size", int(reqState.fetchSize.bodySize))
+			writeStatsdGauge(w, smw.prefix, "fetchsize.buffer-length", int(reqState.fetchSize.bytesLength))
+			writeStatsdGauge(w, smw.prefix, "fetchsize.buffer-capacity", int(reqState.fetchSize.bytesCap))
+		}
+
+		writeStatsdCount(w, smw.prefix, "lastmodified", boolAsInt(reqState.storageMetadata.hasLastModified))
+		writeStatsdCount(w, smw.prefix, "etag", boolAsInt(reqState.storageMetadata.hasEtag))
+
+		writeStatsdCount(w, smw.prefix, "zip-error", boolAsInt(reqState.isZipError))
+		writeStatsdCount(w, smw.prefix, "response-write-error", boolAsInt(reqState.isResponseWriteError))
+		writeStatsdCount(w, smw.prefix, "condition-parse-error", boolAsInt(reqState.isCondError))
+
+		w.Flush()
+
+	}()
 }
 
-func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, duration time.Duration) metricsWriter {
-
-	result := &statsdMetricsWriter{}
-
-	registry := metrics.DefaultRegistry
-
-	// set up response state counters
-	for i := 1; i < int(ResponseState_Count); i += 1 {
-		rrs := reqResponseState(i)
-		stateName := rrs.String()
-		metricName := fmt.Sprintf("responsestate.%s", stateName)
-		result.respState[i] = metrics.NewRegisteredCounter(metricName, registry)
+func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger *log.Logger) metricsWriter {
+	return &statsdMetricsWriter{
+		addr:   addr,
+		prefix: metricsPrefix,
+		logger: logger,
 	}
-
-	// set up fetch state counters
-	for i := 1; i < int(FetchState_Count); i += 1 {
-		rfs := reqFetchState(i)
-		stateName := rfs.String()
-		metricName := fmt.Sprintf("fetchstate.%s", stateName)
-		result.fetchState[i] = metrics.NewRegisteredCounter(metricName, registry)
-	}
-
-	// fetch sizes
-	result.fetchSizeBody = metrics.NewRegisteredGauge("fetchsize.body-size", registry)
-	result.fetchSizeLen = metrics.NewRegisteredGauge("fetchsize.buffer-length", registry)
-	result.fetchSizeCap = metrics.NewRegisteredGauge("fetchsize.buffer-capacity", registry)
-
-	// storage response metadata counters
-	result.lastMod = metrics.NewRegisteredCounter("lastmodified", registry)
-	result.etag = metrics.NewRegisteredCounter("etag", registry)
-
-	// error counters
-	result.zipErr = metrics.NewRegisteredCounter("zip-error", registry)
-	result.respWriteErr = metrics.NewRegisteredCounter("response-write-error", registry)
-	result.condErr = metrics.NewRegisteredCounter("condition-parse-error", registry)
-
-	// this goroutine ticks at the specified duration and sends out the data
-	go statsd.StatsD(registry, duration, metricsPrefix, addr)
-
-	return result
 }
 
 func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger *log.Logger) http.Handler {
