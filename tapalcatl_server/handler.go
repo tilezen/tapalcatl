@@ -199,6 +199,19 @@ func writeStatsdGauge(w io.Writer, prefix string, metric string, value int) {
 	w.Write([]byte(makeStatsdLineGauge(prefix, metric, value)))
 }
 
+type prefixedStatsdWriter struct {
+	prefix string
+	w      io.Writer
+}
+
+func (psw *prefixedStatsdWriter) WriteCount(metric string, value int) {
+	writeStatsdCount(psw.w, psw.prefix, metric, value)
+}
+
+func (psw *prefixedStatsdWriter) WriteGauge(metric string, value int) {
+	writeStatsdGauge(psw.w, psw.prefix, metric, value)
+}
+
 func (smw *statsdMetricsWriter) Write(reqState *requestState) {
 	go func() {
 
@@ -209,12 +222,18 @@ func (smw *statsdMetricsWriter) Write(reqState *requestState) {
 		defer conn.Close()
 
 		w := bufio.NewWriter(conn)
+		defer w.Flush()
+
+		psw := prefixedStatsdWriter{
+			prefix: smw.prefix,
+			w:      w,
+		}
 
 		respStateInt := int32(reqState.responseState)
 		if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
 			respStateName := reqState.responseState.String()
 			respMetricName := fmt.Sprintf("responsestate.%s", respStateName)
-			writeStatsdCount(w, smw.prefix, respMetricName, 1)
+			psw.WriteCount(respMetricName, 1)
 		} else {
 			smw.logger.Printf("ERROR: Invalid response state: %s", reqState.responseState)
 		}
@@ -223,25 +242,23 @@ func (smw *statsdMetricsWriter) Write(reqState *requestState) {
 		if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
 			fetchStateName := reqState.fetchState.String()
 			fetchMetricName := fmt.Sprintf("fetchstate.%s", fetchStateName)
-			writeStatsdCount(w, smw.prefix, fetchMetricName, 1)
+			psw.WriteCount(fetchMetricName, 1)
 		} else {
 			smw.logger.Printf("ERROR: Invalid fetch state: %s", reqState.responseState)
 		}
 
 		if reqState.fetchSize.bodySize > 0 {
-			writeStatsdGauge(w, smw.prefix, "fetchsize.body-size", int(reqState.fetchSize.bodySize))
-			writeStatsdGauge(w, smw.prefix, "fetchsize.buffer-length", int(reqState.fetchSize.bytesLength))
-			writeStatsdGauge(w, smw.prefix, "fetchsize.buffer-capacity", int(reqState.fetchSize.bytesCap))
+			psw.WriteGauge("fetchsize.body-size", int(reqState.fetchSize.bodySize))
+			psw.WriteGauge("fetchsize.buffer-length", int(reqState.fetchSize.bytesLength))
+			psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.fetchSize.bytesCap))
 		}
 
-		writeStatsdCount(w, smw.prefix, "lastmodified", boolAsInt(reqState.storageMetadata.hasLastModified))
-		writeStatsdCount(w, smw.prefix, "etag", boolAsInt(reqState.storageMetadata.hasEtag))
+		psw.WriteCount("lastmodified", boolAsInt(reqState.storageMetadata.hasLastModified))
+		psw.WriteCount("etag", boolAsInt(reqState.storageMetadata.hasEtag))
 
-		writeStatsdCount(w, smw.prefix, "zip-error", boolAsInt(reqState.isZipError))
-		writeStatsdCount(w, smw.prefix, "response-write-error", boolAsInt(reqState.isResponseWriteError))
-		writeStatsdCount(w, smw.prefix, "condition-parse-error", boolAsInt(reqState.isCondError))
-
-		w.Flush()
+		psw.WriteCount("zip-error", boolAsInt(reqState.isZipError))
+		psw.WriteCount("response-write-error", boolAsInt(reqState.isResponseWriteError))
+		psw.WriteCount("condition-parse-error", boolAsInt(reqState.isCondError))
 
 	}()
 }
