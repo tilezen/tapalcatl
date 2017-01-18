@@ -173,6 +173,7 @@ type statsdMetricsWriter struct {
 	addr   *net.UDPAddr
 	prefix string
 	logger *log.Logger
+	queue  chan *requestState
 }
 
 func makeMetricPrefix(prefix string, metric string) string {
@@ -212,63 +213,79 @@ func (psw *prefixedStatsdWriter) WriteGauge(metric string, value int) {
 	writeStatsdGauge(psw.w, psw.prefix, metric, value)
 }
 
+func (smw *statsdMetricsWriter) Process(reqState *requestState) {
+	conn, err := net.DialUDP("udp", nil, smw.addr)
+	if err != nil {
+		smw.logger.Printf("ERROR: Metrics Writer failed to connect to %s: %s\n", smw.addr, err)
+	}
+	defer conn.Close()
+
+	w := bufio.NewWriter(conn)
+	defer w.Flush()
+
+	psw := prefixedStatsdWriter{
+		prefix: smw.prefix,
+		w:      w,
+	}
+
+	respStateInt := int32(reqState.responseState)
+	if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
+		respStateName := reqState.responseState.String()
+		respMetricName := fmt.Sprintf("responsestate.%s", respStateName)
+		psw.WriteCount(respMetricName, 1)
+	} else {
+		smw.logger.Printf("ERROR: Invalid response state: %s", reqState.responseState)
+	}
+
+	fetchStateInt := int32(reqState.fetchState)
+	if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
+		fetchStateName := reqState.fetchState.String()
+		fetchMetricName := fmt.Sprintf("fetchstate.%s", fetchStateName)
+		psw.WriteCount(fetchMetricName, 1)
+	} else {
+		smw.logger.Printf("ERROR: Invalid fetch state: %s", reqState.responseState)
+	}
+
+	if reqState.fetchSize.bodySize > 0 {
+		psw.WriteGauge("fetchsize.body-size", int(reqState.fetchSize.bodySize))
+		psw.WriteGauge("fetchsize.buffer-length", int(reqState.fetchSize.bytesLength))
+		psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.fetchSize.bytesCap))
+	}
+
+	psw.WriteCount("lastmodified", boolAsInt(reqState.storageMetadata.hasLastModified))
+	psw.WriteCount("etag", boolAsInt(reqState.storageMetadata.hasEtag))
+
+	psw.WriteCount("zip-error", boolAsInt(reqState.isZipError))
+	psw.WriteCount("response-write-error", boolAsInt(reqState.isResponseWriteError))
+	psw.WriteCount("condition-parse-error", boolAsInt(reqState.isCondError))
+}
+
 func (smw *statsdMetricsWriter) Write(reqState *requestState) {
-	go func() {
-
-		conn, err := net.DialUDP("udp", nil, smw.addr)
-		if err != nil {
-			smw.logger.Printf("ERROR: Metrics Writer failed to connect to %s: %s\n", smw.addr, err)
-		}
-		defer conn.Close()
-
-		w := bufio.NewWriter(conn)
-		defer w.Flush()
-
-		psw := prefixedStatsdWriter{
-			prefix: smw.prefix,
-			w:      w,
-		}
-
-		respStateInt := int32(reqState.responseState)
-		if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
-			respStateName := reqState.responseState.String()
-			respMetricName := fmt.Sprintf("responsestate.%s", respStateName)
-			psw.WriteCount(respMetricName, 1)
-		} else {
-			smw.logger.Printf("ERROR: Invalid response state: %s", reqState.responseState)
-		}
-
-		fetchStateInt := int32(reqState.fetchState)
-		if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
-			fetchStateName := reqState.fetchState.String()
-			fetchMetricName := fmt.Sprintf("fetchstate.%s", fetchStateName)
-			psw.WriteCount(fetchMetricName, 1)
-		} else {
-			smw.logger.Printf("ERROR: Invalid fetch state: %s", reqState.responseState)
-		}
-
-		if reqState.fetchSize.bodySize > 0 {
-			psw.WriteGauge("fetchsize.body-size", int(reqState.fetchSize.bodySize))
-			psw.WriteGauge("fetchsize.buffer-length", int(reqState.fetchSize.bytesLength))
-			psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.fetchSize.bytesCap))
-		}
-
-		psw.WriteCount("lastmodified", boolAsInt(reqState.storageMetadata.hasLastModified))
-		psw.WriteCount("etag", boolAsInt(reqState.storageMetadata.hasEtag))
-
-		psw.WriteCount("zip-error", boolAsInt(reqState.isZipError))
-		psw.WriteCount("response-write-error", boolAsInt(reqState.isResponseWriteError))
-		psw.WriteCount("condition-parse-error", boolAsInt(reqState.isCondError))
-
-	}()
+	select {
+	case smw.queue <- reqState:
+	default:
+		smw.logger.Printf("WARNING: Metrics Writer queue full\n")
+	}
 }
 
 func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger *log.Logger) metricsWriter {
-	return &statsdMetricsWriter{
+	maxQueueSize := 4096
+	queue := make(chan *requestState, maxQueueSize)
+
+	smw := &statsdMetricsWriter{
 		addr:   addr,
 		prefix: metricsPrefix,
 		logger: logger,
+		queue:  queue,
 	}
+
+	go func(smw *statsdMetricsWriter) {
+		for reqState := range smw.queue {
+			smw.Process(reqState)
+		}
+	}(smw)
+
+	return smw
 }
 
 func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger *log.Logger) http.Handler {
