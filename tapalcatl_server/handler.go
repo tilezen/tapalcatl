@@ -217,6 +217,7 @@ func (smw *statsdMetricsWriter) Process(reqState *requestState) {
 	conn, err := net.DialUDP("udp", nil, smw.addr)
 	if err != nil {
 		smw.logger.Printf("ERROR: Metrics Writer failed to connect to %s: %s\n", smw.addr, err)
+		return
 	}
 	defer conn.Close()
 
