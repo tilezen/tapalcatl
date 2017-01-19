@@ -121,6 +121,10 @@ func logBool(x bool) string {
 	}
 }
 
+func logDuration(x time.Duration) string {
+	return fmt.Sprintf("%d", x.Nanoseconds())
+}
+
 // create a log string
 func (reqState *requestState) String() string {
 
@@ -143,8 +147,15 @@ func (reqState *requestState) String() string {
 	isRespErr := logBool(reqState.isResponseWriteError)
 	isCondErr := logBool(reqState.isCondError)
 
+	timeParse := logDuration(reqState.duration.parse)
+	timeStorageFetch := logDuration(reqState.duration.storageFetch)
+	timeStorageRead := logDuration(reqState.duration.storageRead)
+	timeMetatileFind := logDuration(reqState.duration.metatileFind)
+	timeResponseWrite := logDuration(reqState.duration.respWrite)
+	timeTotal := logDuration(reqState.duration.total)
+
 	result := fmt.Sprintf(
-		"METRICS: respstate(%s) fetchstate(%s) fetchsize(%s) ziperr(%s) resperr(%s) conderr(%s) lastmod(%s) etag(%s)",
+		"METRICS: respstate(%s) fetchstate(%s) fetchsize(%s) ziperr(%s) resperr(%s) conderr(%s) lastmod(%s) etag(%s) time-parse(%s) time-storagefetch(%s) time-storageread(%s) time-metatilefind(%s) time-responsewrite(%s) time-total(%s)",
 		reqState.responseState,
 		reqState.fetchState,
 		fetchSize,
@@ -153,6 +164,12 @@ func (reqState *requestState) String() string {
 		isCondErr,
 		hasLastMod,
 		hasEtag,
+		timeParse,
+		timeStorageFetch,
+		timeStorageRead,
+		timeMetatileFind,
+		timeResponseWrite,
+		timeTotal,
 	)
 
 	return result
