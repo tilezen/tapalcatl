@@ -98,6 +98,10 @@ type reqStorageMetadata struct {
 	hasLastModified, hasEtag bool
 }
 
+type reqDuration struct {
+	parse, storageFetch, storageRead, metatileFind, respWrite, total time.Duration
+}
+
 type requestState struct {
 	responseState        reqResponseState
 	fetchState           reqFetchState
@@ -106,6 +110,7 @@ type requestState struct {
 	isZipError           bool
 	isResponseWriteError bool
 	isCondError          bool
+	duration             reqDuration
 }
 
 func logBool(x bool) string {
@@ -184,12 +189,20 @@ func makeStatsdLineGauge(prefix string, metric string, value int) string {
 	return fmt.Sprintf("%s:%d|g\n", makeMetricPrefix(prefix, metric), value)
 }
 
+func makeStatsdLineTimer(prefix string, metric string, milliseconds int64) string {
+	return fmt.Sprintf("%s:%d|ms\n", makeMetricPrefix(prefix, metric), milliseconds)
+}
+
 func writeStatsdCount(w io.Writer, prefix string, metric string, value int) {
 	w.Write([]byte(makeStatsdLineCount(prefix, metric, value)))
 }
 
 func writeStatsdGauge(w io.Writer, prefix string, metric string, value int) {
 	w.Write([]byte(makeStatsdLineGauge(prefix, metric, value)))
+}
+
+func writeStatsdTimer(w io.Writer, prefix string, metric string, milliseconds int64) {
+	w.Write([]byte(makeStatsdLineTimer(prefix, metric, milliseconds)))
 }
 
 type prefixedStatsdWriter struct {
@@ -208,6 +221,13 @@ func (psw *prefixedStatsdWriter) WriteGauge(metric string, value int) {
 func (psw *prefixedStatsdWriter) WriteBool(metric string, value bool) {
 	if value {
 		psw.WriteCount(metric, 1)
+	}
+}
+
+func (psw *prefixedStatsdWriter) WriteTimer(metric string, value time.Duration) {
+	milliseconds := value.Nanoseconds() / 1000000
+	if milliseconds > 0 {
+		writeStatsdTimer(psw.w, psw.prefix, metric, milliseconds)
 	}
 }
 
@@ -258,6 +278,13 @@ func (smw *statsdMetricsWriter) Process(reqState *requestState) {
 
 	psw.WriteBool("errors.response-write-error", reqState.isResponseWriteError)
 	psw.WriteBool("errors.condition-parse-error", reqState.isCondError)
+
+	psw.WriteTimer("timers.parse", reqState.duration.parse)
+	psw.WriteTimer("timers.storage-fetch", reqState.duration.storageFetch)
+	psw.WriteTimer("timers.storage-read", reqState.duration.storageRead)
+	psw.WriteTimer("timers.metatile-find", reqState.duration.metatileFind)
+	psw.WriteTimer("timers.response-write", reqState.duration.respWrite)
+	psw.WriteTimer("timers.total", reqState.duration.total)
 }
 
 func (smw *statsdMetricsWriter) Write(reqState *requestState) {
@@ -295,10 +322,15 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 		reqState := requestState{}
 
 		numRequests.Add(1)
-		start_time := time.Now()
+
+		startTime := time.Now()
+
 		defer func() {
+			totalDuration := time.Since(startTime)
+			reqState.duration.total = totalDuration
+
 			// update expvar state
-			updateCounters(time.Since(start_time))
+			updateCounters(totalDuration)
 
 			if reqState.responseState == ResponseState_Nil {
 				logger.Printf("ERROR: Code error: handler did not set response state")
@@ -312,7 +344,9 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 
 		}()
 
+		parseStart := time.Now()
 		parseResult, err := p.Parse(req)
+		reqState.duration.parse = time.Since(parseStart)
 		if err != nil {
 			requestParseErrors.Add(1)
 			var sc int
@@ -350,7 +384,10 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 
 		metaCoord, offset := parseResult.Coord.MetaAndOffset(metatileSize)
 
+		storageFetchStart := time.Now()
 		storageResult, err := storage.Fetch(metaCoord, parseResult.Cond)
+		reqState.duration.storageFetch = time.Since(storageFetchStart)
+
 		if err != nil || storageResult.NotFound {
 			if err != nil {
 				storageFetchErrors.Add(1)
@@ -385,7 +422,9 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 		buf := bufferManager.Get()
 		defer bufferManager.Put(buf)
 
+		storageReadStart := time.Now()
 		bodySize, err := io.Copy(buf, storageResp.Body)
+		reqState.duration.storageRead = time.Since(storageReadStart)
 		if err != nil {
 			storageReadErrors.Add(1)
 			logger.Printf("ERROR: Failed to read storage body: %s", err.Error())
@@ -413,7 +452,9 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 			reqState.storageMetadata.hasEtag = true
 		}
 
+		metatileReaderFindStart := time.Now()
 		reader, err := tapalcatl.NewMetatileReader(offset, bytes.NewReader(storageBytes), bodySize)
+		reqState.duration.metatileFind = time.Since(metatileReaderFindStart)
 		if err != nil {
 			metatileReadErrors.Add(1)
 			logger.Printf("ERROR: Failed to read metatile: %s", err.Error())
@@ -425,7 +466,9 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 
 		rw.WriteHeader(http.StatusOK)
 		reqState.responseState = ResponseState_Success
+		respWriteStart := time.Now()
 		_, err = io.Copy(rw, reader)
+		reqState.duration.respWrite = time.Since(respWriteStart)
 		if err != nil {
 			responseWriteErrors.Add(1)
 			logger.Printf("ERROR: Failed to write response body: %s", err.Error())
