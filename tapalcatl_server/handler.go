@@ -116,14 +116,6 @@ func logBool(x bool) string {
 	}
 }
 
-func boolAsInt(x bool) int {
-	if x {
-		return 1
-	} else {
-		return 0
-	}
-}
-
 // create a log string
 func (reqState *requestState) String() string {
 
@@ -213,6 +205,12 @@ func (psw *prefixedStatsdWriter) WriteGauge(metric string, value int) {
 	writeStatsdGauge(psw.w, psw.prefix, metric, value)
 }
 
+func (psw *prefixedStatsdWriter) WriteBool(metric string, value bool) {
+	if value {
+		psw.WriteCount(metric, 1)
+	}
+}
+
 func (smw *statsdMetricsWriter) Process(reqState *requestState) {
 	conn, err := net.DialUDP("udp", nil, smw.addr)
 	if err != nil {
@@ -228,6 +226,8 @@ func (smw *statsdMetricsWriter) Process(reqState *requestState) {
 		prefix: smw.prefix,
 		w:      w,
 	}
+
+	psw.WriteCount("count", 1)
 
 	respStateInt := int32(reqState.responseState)
 	if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
@@ -253,12 +253,12 @@ func (smw *statsdMetricsWriter) Process(reqState *requestState) {
 		psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.fetchSize.bytesCap))
 	}
 
-	psw.WriteCount("lastmodified", boolAsInt(reqState.storageMetadata.hasLastModified))
-	psw.WriteCount("etag", boolAsInt(reqState.storageMetadata.hasEtag))
+	psw.WriteBool("lastmodified", reqState.storageMetadata.hasLastModified)
+	psw.WriteBool("etag", reqState.storageMetadata.hasEtag)
 
-	psw.WriteCount("zip-error", boolAsInt(reqState.isZipError))
-	psw.WriteCount("response-write-error", boolAsInt(reqState.isResponseWriteError))
-	psw.WriteCount("condition-parse-error", boolAsInt(reqState.isCondError))
+	psw.WriteBool("zip-error", reqState.isZipError)
+	psw.WriteBool("response-write-error", reqState.isResponseWriteError)
+	psw.WriteBool("condition-parse-error", reqState.isCondError)
 }
 
 func (smw *statsdMetricsWriter) Write(reqState *requestState) {
