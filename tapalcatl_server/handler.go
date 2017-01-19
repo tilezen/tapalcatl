@@ -177,11 +177,11 @@ func makeMetricPrefix(prefix string, metric string) string {
 }
 
 func makeStatsdLineCount(prefix string, metric string, value int) string {
-	return fmt.Sprintf("%s.count:%d|c\n", makeMetricPrefix(prefix, metric), value)
+	return fmt.Sprintf("%s:%d|c\n", makeMetricPrefix(prefix, metric), value)
 }
 
 func makeStatsdLineGauge(prefix string, metric string, value int) string {
-	return fmt.Sprintf("%s.value:%d|g\n", makeMetricPrefix(prefix, metric), value)
+	return fmt.Sprintf("%s:%d|g\n", makeMetricPrefix(prefix, metric), value)
 }
 
 func writeStatsdCount(w io.Writer, prefix string, metric string, value int) {
