@@ -227,8 +227,6 @@ func (smw *statsdMetricsWriter) Process(reqState *requestState) {
 		w:      w,
 	}
 
-	psw.WriteCount("count", 1)
-
 	respStateInt := int32(reqState.responseState)
 	if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
 		respStateName := reqState.responseState.String()
@@ -253,12 +251,13 @@ func (smw *statsdMetricsWriter) Process(reqState *requestState) {
 		psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.fetchSize.bytesCap))
 	}
 
-	psw.WriteBool("lastmodified", reqState.storageMetadata.hasLastModified)
-	psw.WriteBool("etag", reqState.storageMetadata.hasEtag)
+	psw.WriteCount("counts.all", 1)
+	psw.WriteBool("counts.lastmodified", reqState.storageMetadata.hasLastModified)
+	psw.WriteBool("counts.etag", reqState.storageMetadata.hasEtag)
 
-	psw.WriteBool("zip-error", reqState.isZipError)
-	psw.WriteBool("response-write-error", reqState.isResponseWriteError)
-	psw.WriteBool("condition-parse-error", reqState.isCondError)
+	psw.WriteCount("errors.all", 1)
+	psw.WriteBool("errors.response-write-error", reqState.isResponseWriteError)
+	psw.WriteBool("errors.condition-parse-error", reqState.isCondError)
 }
 
 func (smw *statsdMetricsWriter) Write(reqState *requestState) {
