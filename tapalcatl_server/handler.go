@@ -121,12 +121,12 @@ func logBool(x bool) string {
 	}
 }
 
-func convertNanosToMillis(nanoseconds int64) int64 {
-	return nanoseconds / 1000000
+func convertDurationToMillis(x time.Duration) int64 {
+	return int64(x / time.Millisecond)
 }
 
 func logDuration(x time.Duration) string {
-	return fmt.Sprintf("%d", convertNanosToMillis(x.Nanoseconds()))
+	return fmt.Sprintf("%d", convertDurationToMillis(x))
 }
 
 // create a log string
@@ -210,8 +210,9 @@ func makeStatsdLineGauge(prefix string, metric string, value int) string {
 	return fmt.Sprintf("%s:%d|g\n", makeMetricPrefix(prefix, metric), value)
 }
 
-func makeStatsdLineTimer(prefix string, metric string, milliseconds int64) string {
-	return fmt.Sprintf("%s:%d|ms\n", makeMetricPrefix(prefix, metric), milliseconds)
+func makeStatsdLineTimer(prefix string, metric string, value time.Duration) string {
+	millis := convertDurationToMillis(value)
+	return fmt.Sprintf("%s:%d|ms\n", makeMetricPrefix(prefix, metric), millis)
 }
 
 func writeStatsdCount(w io.Writer, prefix string, metric string, value int) {
@@ -222,8 +223,8 @@ func writeStatsdGauge(w io.Writer, prefix string, metric string, value int) {
 	w.Write([]byte(makeStatsdLineGauge(prefix, metric, value)))
 }
 
-func writeStatsdTimer(w io.Writer, prefix string, metric string, milliseconds int64) {
-	w.Write([]byte(makeStatsdLineTimer(prefix, metric, milliseconds)))
+func writeStatsdTimer(w io.Writer, prefix string, metric string, value time.Duration) {
+	w.Write([]byte(makeStatsdLineTimer(prefix, metric, value)))
 }
 
 type prefixedStatsdWriter struct {
@@ -246,7 +247,7 @@ func (psw *prefixedStatsdWriter) WriteBool(metric string, value bool) {
 }
 
 func (psw *prefixedStatsdWriter) WriteTimer(metric string, value time.Duration) {
-	writeStatsdTimer(psw.w, psw.prefix, metric, convertNanosToMillis(value.Nanoseconds()))
+	writeStatsdTimer(psw.w, psw.prefix, metric, value)
 }
 
 func (smw *statsdMetricsWriter) Process(reqState *requestState) {
