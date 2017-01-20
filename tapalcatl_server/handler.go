@@ -246,10 +246,7 @@ func (psw *prefixedStatsdWriter) WriteBool(metric string, value bool) {
 }
 
 func (psw *prefixedStatsdWriter) WriteTimer(metric string, value time.Duration) {
-	milliseconds := convertNanosToMillis(value.Nanoseconds())
-	if milliseconds > 0 {
-		writeStatsdTimer(psw.w, psw.prefix, metric, milliseconds)
-	}
+	writeStatsdTimer(psw.w, psw.prefix, metric, convertNanosToMillis(value.Nanoseconds()))
 }
 
 func (smw *statsdMetricsWriter) Process(reqState *requestState) {
