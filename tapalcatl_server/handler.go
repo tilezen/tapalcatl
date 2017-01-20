@@ -121,8 +121,12 @@ func logBool(x bool) string {
 	}
 }
 
+func convertNanosToMillis(nanoseconds int64) int64 {
+	return nanoseconds / 1000000
+}
+
 func logDuration(x time.Duration) string {
-	return fmt.Sprintf("%d", x.Nanoseconds())
+	return fmt.Sprintf("%d", convertNanosToMillis(x.Nanoseconds()))
 }
 
 // create a log string
@@ -242,7 +246,7 @@ func (psw *prefixedStatsdWriter) WriteBool(metric string, value bool) {
 }
 
 func (psw *prefixedStatsdWriter) WriteTimer(metric string, value time.Duration) {
-	milliseconds := value.Nanoseconds() / 1000000
+	milliseconds := convertNanosToMillis(value.Nanoseconds())
 	if milliseconds > 0 {
 		writeStatsdTimer(psw.w, psw.prefix, metric, milliseconds)
 	}
