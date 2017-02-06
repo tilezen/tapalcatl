@@ -1,8 +1,6 @@
 Tapalcatl
 =========
 
-**Tapalcatl is very alpha and probably broken!** Help would be most welcome in making it less broken.
-
 Tapalcatl is a "metatile server", which takes requests for a specific single format and tile coordinate and makes a request upstream for a "metatile" or bundle of tiles which contains the tile originally requested.
 
 For example:
