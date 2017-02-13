@@ -462,7 +462,11 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 		headers := rw.Header()
 		headers.Set("Content-Type", parseResult.ContentType)
 		if lastMod := storageResp.LastModified; lastMod != nil {
-			lastModifiedFormatted := lastMod.Format(time.RFC1123Z)
+			// important! we must format times in an HTTP-compliant way, which
+			// apparently doesn't match any existing Go time format string, so the
+			// recommended way is to switch to UTC and use the format string that
+			// the net/http package exposes.
+			lastModifiedFormatted := lastMod.UTC().Format(http.TimeFormat)
 			headers.Set("Last-Modified", lastModifiedFormatted)
 			reqState.storageMetadata.hasLastModified = true
 		}

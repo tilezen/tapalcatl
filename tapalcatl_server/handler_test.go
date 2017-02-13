@@ -129,8 +129,8 @@ func TestHandlerHit(t *testing.T) {
 	}
 
 	etag := "1234"
-	lastModifiedStr := "Thu, 17 Nov 2016 12:27:00 +0000"
-	lastModified, err := time.Parse(time.RFC1123Z, lastModifiedStr)
+	lastModifiedStr := "Thu, 17 Nov 2016 12:27:00 GMT"
+	lastModified, err := time.Parse(http.TimeFormat, lastModifiedStr)
 	if err != nil {
 		t.Fatalf("Couldn't parse time %s: %s", lastModifiedStr, err)
 	}

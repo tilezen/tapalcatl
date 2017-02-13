@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/tilezen/tapalcatl"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -95,9 +96,11 @@ func TestS3Storage(t *testing.T) {
 	if lastMod == nil {
 		t.Fatalf("Missing last modified from storage")
 	}
-	// should be formatted in RFC 822 / 1123 format
-	expLastModStr := "Thu, 17 Nov 2016 12:27:00 +0000"
-	lastModStr := lastMod.Format(time.RFC1123Z)
+	// should be formatted in HTTP standard way, which means the GMT on the end
+	// is intentional, and shouldn't be UTC or +0000 or Z, despite all of those
+	// being better choices.
+	expLastModStr := "Thu, 17 Nov 2016 12:27:00 GMT"
+	lastModStr := lastMod.UTC().Format(http.TimeFormat)
 	if expLastModStr != lastModStr {
 		t.Fatalf("Expected Last-Modified to be %#v, but got %#v", expLastModStr, lastModStr)
 	}

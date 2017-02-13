@@ -87,6 +87,7 @@ func (h *handlerConfig) Set(line string) error {
 // try and parse a range of different date formats which are allowed by HTTP.
 func parseHTTPDates(date string) (*time.Time, error) {
 	time_layouts := []string{
+		http.TimeFormat,
 		time.RFC1123, time.RFC1123Z,
 		time.RFC822, time.RFC822Z,
 		time.RFC850, time.ANSIC,
@@ -103,7 +104,7 @@ func parseHTTPDates(date string) (*time.Time, error) {
 	}
 
 	// give the error for our preferred format
-	_, err = time.Parse(time.RFC1123, date)
+	_, err = time.Parse(http.TimeFormat, date)
 	return nil, err
 }
 
