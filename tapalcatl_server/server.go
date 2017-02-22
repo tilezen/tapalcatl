@@ -253,6 +253,11 @@ func (bm *OnDemandBufferManager) Get() *bytes.Buffer {
 func (bm *OnDemandBufferManager) Put(buf *bytes.Buffer) {
 }
 
+func logFatalCfgErr(logger JsonLogger, msg string, xs ...interface{}) {
+	logger.Error(LogCategory_ConfigError, msg, xs...)
+	os.Exit(1)
+}
+
 func main() {
 	var listen, healthcheck, debugHost string
 	var poolNumEntries, poolEntrySize int
@@ -260,8 +265,16 @@ func main() {
 
 	hc := handlerConfig{}
 
+	systemLogger := log.New(os.Stdout, "", log.LstdFlags|log.LUTC|log.Lmicroseconds)
+	hostname, err := os.Hostname()
+	if err != nil {
+		// NOTE: if there are legitimate cases when this can fail, we
+		// can leave off the hostname in the logger.
+		// But for now we prefer to get notified of it.
+		systemLogger.Fatalf("ERROR: Cannot find hostname to use for logger")
+	}
 	// use this logger everywhere.
-	logger := log.New(os.Stdout, "tapalcatl ", log.LstdFlags)
+	logger := NewJsonLogger(systemLogger, hostname)
 
 	f := flag.NewFlagSetWithEnvPrefix(os.Args[0], "TAPALCATL", 0)
 	f.Var(&hc, "handler",
@@ -304,18 +317,18 @@ func main() {
 	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
 	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
 
-	err := f.Parse(os.Args[1:])
+	err = f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
 		return
 	} else if err != nil {
-		logger.Fatalf("ERROR: Unable to parse input command line, environment or config: %s", err.Error())
+		logFatalCfgErr(logger, "Unable to parse input command line, environment or config: %s", err.Error())
 	}
 
 	if len(hc.Pattern) == 0 {
-		logger.Fatalf("ERROR: You must provide at least one pattern.")
+		logFatalCfgErr(logger, "You must provide at least one pattern.")
 	}
 	if len(hc.Storage) == 0 {
-		logger.Fatalf("ERROR: You must provide at least one storage.")
+		logFatalCfgErr(logger, "You must provide at least one storage.")
 	}
 
 	r := mux.NewRouter()
@@ -334,7 +347,7 @@ func main() {
 	if metricsStatsdAddr != "" {
 		udpAddr, err := net.ResolveUDPAddr("udp4", metricsStatsdAddr)
 		if err != nil {
-			logger.Fatalf("ERROR: Invalid metricsstatsdaddr %s: %s", metricsStatsdAddr, err)
+			logFatalCfgErr(logger, "Invalid metricsstatsdaddr %s: %s", metricsStatsdAddr, err)
 		}
 		mw = NewStatsdMetricsWriter(udpAddr, metricsStatsdPrefix, logger)
 	} else {
@@ -351,7 +364,7 @@ func main() {
 		t := sc.Type_
 		sd, ok := hc.Storage[t]
 		if !ok {
-			logger.Fatalf("ERROR: Missing storage definition: %s", t)
+			logFatalCfgErr(logger, "Missing storage definition: %s", t)
 		}
 		metatileSize := sd.MetatileSize
 		if sc.MetatileSize != nil {
@@ -362,13 +375,13 @@ func main() {
 			layer = *sc.Layer
 		}
 		if layer == "" {
-			logger.Fatalf("ERROR: Missing layer for storage: %s", t)
+			logFatalCfgErr(logger, "Missing layer for storage: %s", t)
 		}
 
 		switch t {
 		case "s3":
 			if sc.Prefix == nil {
-				logger.Fatalf("ERROR: S3 configuration requires prefix")
+				logFatalCfgErr(logger, "S3 configuration requires prefix")
 			}
 			prefix := *sc.Prefix
 
@@ -382,7 +395,7 @@ func main() {
 				}
 			}
 			if err != nil {
-				logger.Fatalf("ERROR: Unable to set up AWS session: %s", err.Error())
+				logFatalCfgErr(logger, "Unable to set up AWS session: %s", err.Error())
 			}
 			keyPattern := sd.KeyPattern
 			if sc.KeyPattern != nil {
@@ -390,10 +403,10 @@ func main() {
 			}
 
 			if sd.Bucket == "" {
-				logger.Fatalf("ERROR: S3 storage missing bucket configuration")
+				logFatalCfgErr(logger, "S3 storage missing bucket configuration")
 			}
 			if keyPattern == "" {
-				logger.Fatalf("ERROR: S3 storage missing key pattern")
+				logFatalCfgErr(logger, "S3 storage missing key pattern")
 			}
 
 			s3Client := s3.New(awsSession)
@@ -402,17 +415,17 @@ func main() {
 		case "file":
 			sd, ok := hc.Storage[t]
 			if !ok {
-				logger.Fatalf("ERROR: Missing file storage definition")
+				logFatalCfgErr(logger, "Missing file storage definition")
 			}
 
 			if sd.BaseDir == "" {
-				logger.Fatalf("ERROR: File storage missing base dir")
+				logFatalCfgErr(logger, "File storage missing base dir")
 			}
 
 			storage = NewFileStorage(sd.BaseDir, layer)
 
 		default:
-			logger.Fatalf("ERROR: Unknown storage %s", t)
+			logFatalCfgErr(logger, "Unknown storage %s", t)
 		}
 
 		parser := &MuxParser{
@@ -432,16 +445,16 @@ func main() {
 	// serve expvar stats to localhost and debugHost
 	expvar_func, err := stats.HandlerFunc(debugHost)
 	if err != nil {
-		logger.Fatalf("ERROR: Failed to initialize stats.HandlerFunc: %s", err.Error())
+		logFatalCfgErr(logger, "Failed to initialize stats.HandlerFunc: %s", err.Error())
 	}
 	r.HandleFunc("/debug/vars", expvar_func).Methods("GET")
 
 	corsHandler := handlers.CORS()(r)
 	logHandler := handlers.CombinedLoggingHandler(os.Stdout, corsHandler)
 
-	logger.Printf("INFO: Server started and listening on %s\n", listen)
+	logger.Info("Server started and listening on %s\n", listen)
 
-	logger.Fatal(http.ListenAndServe(listen, logHandler))
+	systemLogger.Fatal(http.ListenAndServe(listen, logHandler))
 }
 
 func getHealth(rw http.ResponseWriter, _ *http.Request) {

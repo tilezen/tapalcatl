@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/tilezen/tapalcatl"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"time"
@@ -31,10 +30,10 @@ type BufferManager interface {
 // a log parser will pick this up and use it to persist metrics
 // the string functions here are specific to the format used and should be updated with care
 
-type reqResponseState int32
+type ReqResponseState int32
 
 const (
-	ResponseState_Nil reqResponseState = iota
+	ResponseState_Nil ReqResponseState = iota
 	ResponseState_Success
 	ResponseState_NotModified
 	ResponseState_NotFound
@@ -43,7 +42,7 @@ const (
 	ResponseState_Count
 )
 
-func (rrs reqResponseState) String() string {
+func (rrs ReqResponseState) String() string {
 	switch rrs {
 	case ResponseState_Nil:
 		return "nil"
@@ -62,10 +61,10 @@ func (rrs reqResponseState) String() string {
 	}
 }
 
-type reqFetchState int32
+type ReqFetchState int32
 
 const (
-	FetchState_Nil reqFetchState = iota
+	FetchState_Nil ReqFetchState = iota
 	FetchState_Success
 	FetchState_NotFound
 	FetchState_FetchError
@@ -73,7 +72,7 @@ const (
 	FetchState_Count
 )
 
-func (rfs reqFetchState) String() string {
+func (rfs ReqFetchState) String() string {
 	switch rfs {
 	case FetchState_Nil:
 		return "nil"
@@ -90,108 +89,95 @@ func (rfs reqFetchState) String() string {
 	}
 }
 
-type reqFetchSize struct {
-	bodySize, bytesLength, bytesCap int64
+type ReqFetchSize struct {
+	BodySize    int64
+	BytesLength int64
+	BytesCap    int64
 }
 
-type reqStorageMetadata struct {
-	hasLastModified, hasEtag bool
+type ReqStorageMetadata struct {
+	HasLastModified bool
+	HasEtag         bool
 }
 
-type reqDuration struct {
-	parse, storageFetch, storageRead, metatileFind, respWrite, total time.Duration
+type ReqDuration struct {
+	Parse, StorageFetch, StorageRead, MetatileFind, RespWrite, Total time.Duration
 }
 
-type requestState struct {
-	responseState        reqResponseState
-	fetchState           reqFetchState
-	fetchSize            reqFetchSize
-	storageMetadata      reqStorageMetadata
-	isZipError           bool
-	isResponseWriteError bool
-	isCondError          bool
-	duration             reqDuration
+// durations will be logged in milliseconds
+type JsonReqDuration struct {
+	Parse        int64
+	StorageFetch int64
+	StorageRead  int64
+	MetatileFind int64
+	RespWrite    int64
+	Total        int64
 }
 
-func logBool(x bool) string {
-	if x {
-		return "1"
-	} else {
-		return "0"
-	}
+type RequestState struct {
+	ResponseState        ReqResponseState
+	FetchState           ReqFetchState
+	FetchSize            ReqFetchSize
+	StorageMetadata      ReqStorageMetadata
+	IsZipError           bool
+	IsResponseWriteError bool
+	IsCondError          bool
+	Duration             ReqDuration
 }
 
 func convertDurationToMillis(x time.Duration) int64 {
 	return int64(x / time.Millisecond)
 }
 
-func logDuration(x time.Duration) string {
-	return fmt.Sprintf("%d", convertDurationToMillis(x))
-}
+func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 
-// create a log string
-func (reqState *requestState) String() string {
+	result := make(map[string]interface{})
 
-	var fetchSize string
-	if reqState.fetchSize.bodySize > 0 {
-		fetchSize = fmt.Sprintf(
-			"%d %d %d",
-			reqState.fetchSize.bodySize,
-			reqState.fetchSize.bytesLength,
-			reqState.fetchSize.bytesCap,
-		)
-	} else {
-		fetchSize = "nil"
+	result["response_state"] = reqState.ResponseState.String()
+	result["fetch_state"] = reqState.FetchState.String()
+
+	result["is_zip_error"] = reqState.IsZipError
+	result["is_response_write_error"] = reqState.IsResponseWriteError
+	result["is_cond_error"] = reqState.IsCondError
+
+	if reqState.FetchSize.BodySize > 0 {
+		result["fetch_size"] = map[string]int64{
+			"body_size":    reqState.FetchSize.BodySize,
+			"bytes_length": reqState.FetchSize.BytesLength,
+			"bytes_cap":    reqState.FetchSize.BytesCap,
+		}
 	}
 
-	hasLastMod := logBool(reqState.storageMetadata.hasLastModified)
-	hasEtag := logBool(reqState.storageMetadata.hasEtag)
+	result["storageMetadata"] = map[string]bool{
+		"has_last_modified": reqState.StorageMetadata.HasLastModified,
+		"has_etag":          reqState.StorageMetadata.HasEtag,
+	}
 
-	isZipErr := logBool(reqState.isZipError)
-	isRespErr := logBool(reqState.isResponseWriteError)
-	isCondErr := logBool(reqState.isCondError)
-
-	timeParse := logDuration(reqState.duration.parse)
-	timeStorageFetch := logDuration(reqState.duration.storageFetch)
-	timeStorageRead := logDuration(reqState.duration.storageRead)
-	timeMetatileFind := logDuration(reqState.duration.metatileFind)
-	timeResponseWrite := logDuration(reqState.duration.respWrite)
-	timeTotal := logDuration(reqState.duration.total)
-
-	result := fmt.Sprintf(
-		"METRICS: respstate(%s) fetchstate(%s) fetchsize(%s) ziperr(%s) resperr(%s) conderr(%s) lastmod(%s) etag(%s) time-parse(%s) time-storagefetch(%s) time-storageread(%s) time-metatilefind(%s) time-responsewrite(%s) time-total(%s)",
-		reqState.responseState,
-		reqState.fetchState,
-		fetchSize,
-		isZipErr,
-		isRespErr,
-		isCondErr,
-		hasLastMod,
-		hasEtag,
-		timeParse,
-		timeStorageFetch,
-		timeStorageRead,
-		timeMetatileFind,
-		timeResponseWrite,
-		timeTotal,
-	)
+	result["duration"] = map[string]int64{
+		"parse":         convertDurationToMillis(reqState.Duration.Parse),
+		"storage_fetch": convertDurationToMillis(reqState.Duration.StorageFetch),
+		"storage_read":  convertDurationToMillis(reqState.Duration.StorageRead),
+		"metatile_find": convertDurationToMillis(reqState.Duration.MetatileFind),
+		"resp_write":    convertDurationToMillis(reqState.Duration.RespWrite),
+		"total":         convertDurationToMillis(reqState.Duration.Total),
+	}
 
 	return result
 }
 
 type metricsWriter interface {
-	Write(*requestState)
+	Write(*RequestState)
 }
 
 type nilMetricsWriter struct{}
 
-func (_ *nilMetricsWriter) Write(reqState *requestState) {}
+func (_ *nilMetricsWriter) Write(reqState *RequestState) {}
 
 type statsdMetricsWriter struct {
 	addr   *net.UDPAddr
 	prefix string
-	logger *log.Logger
-	queue  chan *requestState
+	logger JsonLogger
+	queue  chan *RequestState
 }
 
 func makeMetricPrefix(prefix string, metric string) string {
@@ -250,10 +236,10 @@ func (psw *prefixedStatsdWriter) WriteTimer(metric string, value time.Duration) 
 	writeStatsdTimer(psw.w, psw.prefix, metric, value)
 }
 
-func (smw *statsdMetricsWriter) Process(reqState *requestState) {
+func (smw *statsdMetricsWriter) Process(reqState *RequestState) {
 	conn, err := net.DialUDP("udp", nil, smw.addr)
 	if err != nil {
-		smw.logger.Printf("ERROR: Metrics Writer failed to connect to %s: %s\n", smw.addr, err)
+		smw.logger.Error(LogCategory_Metrics, "Metrics Writer failed to connect to %s: %s\n", smw.addr, err)
 		return
 	}
 	defer conn.Close()
@@ -268,55 +254,55 @@ func (smw *statsdMetricsWriter) Process(reqState *requestState) {
 
 	psw.WriteCount("count", 1)
 
-	respStateInt := int32(reqState.responseState)
+	respStateInt := int32(reqState.ResponseState)
 	if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
-		respStateName := reqState.responseState.String()
+		respStateName := reqState.ResponseState.String()
 		respMetricName := fmt.Sprintf("responsestate.%s", respStateName)
 		psw.WriteCount(respMetricName, 1)
 	} else {
-		smw.logger.Printf("ERROR: Invalid response state: %s", reqState.responseState)
+		smw.logger.Error(LogCategory_InvalidCodeState, "Invalid response state: %s", reqState.ResponseState)
 	}
 
-	fetchStateInt := int32(reqState.fetchState)
+	fetchStateInt := int32(reqState.FetchState)
 	if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
-		fetchStateName := reqState.fetchState.String()
+		fetchStateName := reqState.FetchState.String()
 		fetchMetricName := fmt.Sprintf("fetchstate.%s", fetchStateName)
 		psw.WriteCount(fetchMetricName, 1)
 	} else {
-		smw.logger.Printf("ERROR: Invalid fetch state: %s", reqState.responseState)
+		smw.logger.Error(LogCategory_InvalidCodeState, "Invalid fetch state: %s", reqState.ResponseState)
 	}
 
-	if reqState.fetchSize.bodySize > 0 {
-		psw.WriteGauge("fetchsize.body-size", int(reqState.fetchSize.bodySize))
-		psw.WriteGauge("fetchsize.buffer-length", int(reqState.fetchSize.bytesLength))
-		psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.fetchSize.bytesCap))
+	if reqState.FetchSize.BodySize > 0 {
+		psw.WriteGauge("fetchsize.body-size", int(reqState.FetchSize.BodySize))
+		psw.WriteGauge("fetchsize.buffer-length", int(reqState.FetchSize.BytesLength))
+		psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.FetchSize.BytesCap))
 	}
 
-	psw.WriteBool("counts.lastmodified", reqState.storageMetadata.hasLastModified)
-	psw.WriteBool("counts.etag", reqState.storageMetadata.hasEtag)
+	psw.WriteBool("counts.lastmodified", reqState.StorageMetadata.HasLastModified)
+	psw.WriteBool("counts.etag", reqState.StorageMetadata.HasEtag)
 
-	psw.WriteBool("errors.response-write-error", reqState.isResponseWriteError)
-	psw.WriteBool("errors.condition-parse-error", reqState.isCondError)
+	psw.WriteBool("errors.response-write-error", reqState.IsResponseWriteError)
+	psw.WriteBool("errors.condition-parse-error", reqState.IsCondError)
 
-	psw.WriteTimer("timers.parse", reqState.duration.parse)
-	psw.WriteTimer("timers.storage-fetch", reqState.duration.storageFetch)
-	psw.WriteTimer("timers.storage-read", reqState.duration.storageRead)
-	psw.WriteTimer("timers.metatile-find", reqState.duration.metatileFind)
-	psw.WriteTimer("timers.response-write", reqState.duration.respWrite)
-	psw.WriteTimer("timers.total", reqState.duration.total)
+	psw.WriteTimer("timers.parse", reqState.Duration.Parse)
+	psw.WriteTimer("timers.storage-fetch", reqState.Duration.StorageFetch)
+	psw.WriteTimer("timers.storage-read", reqState.Duration.StorageRead)
+	psw.WriteTimer("timers.metatile-find", reqState.Duration.MetatileFind)
+	psw.WriteTimer("timers.response-write", reqState.Duration.RespWrite)
+	psw.WriteTimer("timers.total", reqState.Duration.Total)
 }
 
-func (smw *statsdMetricsWriter) Write(reqState *requestState) {
+func (smw *statsdMetricsWriter) Write(reqState *RequestState) {
 	select {
 	case smw.queue <- reqState:
 	default:
-		smw.logger.Printf("WARNING: Metrics Writer queue full\n")
+		smw.logger.Warning(LogCategory_Metrics, "Metrics Writer queue full\n")
 	}
 }
 
-func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger *log.Logger) metricsWriter {
+func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger JsonLogger) metricsWriter {
 	maxQueueSize := 4096
-	queue := make(chan *requestState, maxQueueSize)
+	queue := make(chan *RequestState, maxQueueSize)
 
 	smw := &statsdMetricsWriter{
 		addr:   addr,
@@ -334,11 +320,11 @@ func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger *log
 	return smw
 }
 
-func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger *log.Logger) http.Handler {
+func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger JsonLogger) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 
-		reqState := requestState{}
+		reqState := RequestState{}
 
 		numRequests.Add(1)
 
@@ -346,17 +332,17 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 
 		defer func() {
 			totalDuration := time.Since(startTime)
-			reqState.duration.total = totalDuration
+			reqState.Duration.Total = totalDuration
 
 			// update expvar state
 			updateCounters(totalDuration)
 
-			if reqState.responseState == ResponseState_Nil {
-				logger.Printf("ERROR: Code error: handler did not set response state")
+			if reqState.ResponseState == ResponseState_Nil {
+				logger.Error(LogCategory_InvalidCodeState, "handler did not set response state")
 			}
 
-			// relies on the Stringer implementation to format the record correctly
-			logger.Printf("INFO: %s", &reqState)
+			jsonReqData := reqState.AsJsonMap()
+			logger.Metrics(jsonReqData)
 
 			// write out metrics
 			mw.Write(&reqState)
@@ -365,31 +351,31 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 
 		parseStart := time.Now()
 		parseResult, err := p.Parse(req)
-		reqState.duration.parse = time.Since(parseStart)
+		reqState.Duration.Parse = time.Since(parseStart)
 		if err != nil {
 			requestParseErrors.Add(1)
 			var sc int
 			var response string
 
 			if pe, ok := err.(*ParseError); ok {
-				logger.Printf("WARNING: Parse failure: %s", err.Error())
+				logger.Warning(LogCategory_ParseError, err.Error())
 				if pe.MimeError != nil {
 					sc = http.StatusNotFound
-					reqState.responseState = ResponseState_NotFound
+					reqState.ResponseState = ResponseState_NotFound
 					response = pe.MimeError.Error()
 				} else if pe.CoordError != nil {
 					sc = http.StatusBadRequest
-					reqState.responseState = ResponseState_BadRequest
+					reqState.ResponseState = ResponseState_BadRequest
 					response = pe.CoordError.Error()
 				} else if pe.CondError != nil {
-					reqState.isCondError = true
-					logger.Printf("WARNING: Condition Error: %s", pe.CondError)
+					reqState.IsCondError = true
+					logger.Warning(LogCategory_ConditionError, pe.CondError.Error())
 				}
 			} else {
-				logger.Printf("ERROR: Unknown parse error: %#v\n", err)
+				logger.Error(LogCategory_ParseError, "Unknown parse error: %#v\n", err)
 				sc = http.StatusInternalServerError
 				response = "Internal server error"
-				reqState.responseState = ResponseState_Error
+				reqState.ResponseState = ResponseState_Error
 			}
 
 			// only return an error response when not a condition parse error
@@ -405,30 +391,30 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 
 		storageFetchStart := time.Now()
 		storageResult, err := storage.Fetch(metaCoord, parseResult.Cond)
-		reqState.duration.storageFetch = time.Since(storageFetchStart)
+		reqState.Duration.StorageFetch = time.Since(storageFetchStart)
 
 		if err != nil || storageResult.NotFound {
 			if err != nil {
 				storageFetchErrors.Add(1)
-				logger.Printf("WARNING: Metatile storage fetch failure: %s", err.Error())
+				logger.Warning(LogCategory_StorageError, "Metatile storage fetch failure: %#v", err)
 				http.Error(rw, err.Error(), http.StatusInternalServerError)
-				reqState.fetchState = FetchState_FetchError
-				reqState.responseState = ResponseState_Error
+				reqState.FetchState = FetchState_FetchError
+				reqState.ResponseState = ResponseState_Error
 			} else {
 				numStorageMisses.Add(1)
 				http.NotFound(rw, req)
-				reqState.fetchState = FetchState_NotFound
-				reqState.responseState = ResponseState_NotFound
+				reqState.FetchState = FetchState_NotFound
+				reqState.ResponseState = ResponseState_NotFound
 			}
 			return
 		}
 		numStorageHits.Add(1)
-		reqState.fetchState = FetchState_Success
+		reqState.FetchState = FetchState_Success
 
 		if storageResult.NotModified {
 			numStorageNotModified.Add(1)
 			rw.WriteHeader(http.StatusNotModified)
-			reqState.responseState = ResponseState_NotModified
+			reqState.ResponseState = ResponseState_NotModified
 			return
 		}
 		numStorageReads.Add(1)
@@ -443,21 +429,21 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 
 		storageReadStart := time.Now()
 		bodySize, err := io.Copy(buf, storageResp.Body)
-		reqState.duration.storageRead = time.Since(storageReadStart)
+		reqState.Duration.StorageRead = time.Since(storageReadStart)
 		if err != nil {
 			storageReadErrors.Add(1)
-			logger.Printf("ERROR: Failed to read storage body: %s", err.Error())
+			logger.Error(LogCategory_StorageError, "Failed to read storage body: %#v", err)
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
-			reqState.fetchState = FetchState_ReadError
-			reqState.responseState = ResponseState_Error
+			reqState.FetchState = FetchState_ReadError
+			reqState.ResponseState = ResponseState_Error
 			return
 		}
-		reqState.fetchState = FetchState_Success
+		reqState.FetchState = FetchState_Success
 
 		storageBytes := buf.Bytes()
-		reqState.fetchSize.bodySize = bodySize
-		reqState.fetchSize.bytesLength = int64(len(storageBytes))
-		reqState.fetchSize.bytesCap = int64(cap(storageBytes))
+		reqState.FetchSize.BodySize = bodySize
+		reqState.FetchSize.BytesLength = int64(len(storageBytes))
+		reqState.FetchSize.BytesCap = int64(cap(storageBytes))
 
 		headers := rw.Header()
 		headers.Set("Content-Type", parseResult.ContentType)
@@ -468,34 +454,34 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 			// the net/http package exposes.
 			lastModifiedFormatted := lastMod.UTC().Format(http.TimeFormat)
 			headers.Set("Last-Modified", lastModifiedFormatted)
-			reqState.storageMetadata.hasLastModified = true
+			reqState.StorageMetadata.HasLastModified = true
 		}
 		if etag := storageResp.ETag; etag != nil {
 			headers.Set("ETag", *etag)
-			reqState.storageMetadata.hasEtag = true
+			reqState.StorageMetadata.HasEtag = true
 		}
 
 		metatileReaderFindStart := time.Now()
 		reader, err := tapalcatl.NewMetatileReader(offset, bytes.NewReader(storageBytes), bodySize)
-		reqState.duration.metatileFind = time.Since(metatileReaderFindStart)
+		reqState.Duration.MetatileFind = time.Since(metatileReaderFindStart)
 		if err != nil {
 			metatileReadErrors.Add(1)
-			logger.Printf("ERROR: Failed to read metatile: %s", err.Error())
+			logger.Error(LogCategory_MetatileError, "Failed to read metatile: %#v", err)
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
-			reqState.isZipError = true
-			reqState.responseState = ResponseState_Error
+			reqState.IsZipError = true
+			reqState.ResponseState = ResponseState_Error
 			return
 		}
 
 		rw.WriteHeader(http.StatusOK)
-		reqState.responseState = ResponseState_Success
+		reqState.ResponseState = ResponseState_Success
 		respWriteStart := time.Now()
 		_, err = io.Copy(rw, reader)
-		reqState.duration.respWrite = time.Since(respWriteStart)
+		reqState.Duration.RespWrite = time.Since(respWriteStart)
 		if err != nil {
 			responseWriteErrors.Add(1)
-			logger.Printf("ERROR: Failed to write response body: %s", err.Error())
-			reqState.isResponseWriteError = true
+			logger.Error(LogCategory_ResponseError, "Failed to write response body: %#v", err)
+			reqState.IsResponseWriteError = true
 		}
 	})
 }
