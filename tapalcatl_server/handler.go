@@ -123,6 +123,7 @@ type RequestState struct {
 	IsResponseWriteError bool
 	IsCondError          bool
 	Duration             ReqDuration
+	Coord                *tapalcatl.TileCoord
 }
 
 func convertDurationToMillis(x time.Duration) int64 {
@@ -160,6 +161,14 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 		"metatile_find": convertDurationToMillis(reqState.Duration.MetatileFind),
 		"resp_write":    convertDurationToMillis(reqState.Duration.RespWrite),
 		"total":         convertDurationToMillis(reqState.Duration.Total),
+	}
+
+	if reqState.Coord != nil {
+		result["coord"] = map[string]int{
+			"x": reqState.Coord.X,
+			"y": reqState.Coord.Y,
+			"z": reqState.Coord.Z,
+		}
 	}
 
 	return result
@@ -386,6 +395,8 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 				return
 			}
 		}
+
+		reqState.Coord = &parseResult.Coord
 
 		metaCoord, offset := parseResult.Coord.MetaAndOffset(metatileSize)
 
