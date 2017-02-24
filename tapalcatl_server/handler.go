@@ -69,6 +69,25 @@ func (rrs ReqResponseState) String() string {
 	}
 }
 
+func (rrs ReqResponseState) AsStatusCode() int {
+	switch rrs {
+	case ResponseState_Nil:
+		return 0
+	case ResponseState_Success:
+		return 200
+	case ResponseState_NotModified:
+		return 304
+	case ResponseState_NotFound:
+		return 404
+	case ResponseState_BadRequest:
+		return 400
+	case ResponseState_Error:
+		return 500
+	default:
+		return -1
+	}
+}
+
 type ReqFetchState int32
 
 const (
@@ -143,7 +162,7 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 
 	result := make(map[string]interface{})
 
-	result["response_state"] = reqState.ResponseState.String()
+	result["response_state"] = reqState.ResponseState.AsStatusCode()
 	result["fetch_state"] = reqState.FetchState.String()
 
 	reqStateErrs := make(map[string]bool)
