@@ -11,10 +11,18 @@ import (
 	"time"
 )
 
+type HttpRequestData struct {
+	Path      string
+	ApiKey    string
+	UserAgent string
+	Referrer  string
+}
+
 type ParseResult struct {
 	Coord       tapalcatl.TileCoord
 	Cond        Condition
 	ContentType string
+	HttpData    HttpRequestData
 }
 
 type Parser interface {
@@ -124,6 +132,7 @@ type RequestState struct {
 	IsCondError          bool
 	Duration             ReqDuration
 	Coord                *tapalcatl.TileCoord
+	HttpData             *HttpRequestData
 }
 
 func convertDurationToMillis(x time.Duration) int64 {
@@ -169,6 +178,21 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 			"y": reqState.Coord.Y,
 			"z": reqState.Coord.Z,
 		}
+	}
+
+	if reqState.HttpData != nil {
+		httpJsonData := make(map[string]string)
+		httpJsonData["path"] = reqState.HttpData.Path
+		if userAgent := reqState.HttpData.UserAgent; userAgent != "" {
+			httpJsonData["user_agent"] = userAgent
+		}
+		if referrer := reqState.HttpData.Referrer; referrer != "" {
+			httpJsonData["referer"] = referrer
+		}
+		if apiKey := reqState.HttpData.ApiKey; apiKey != "" {
+			httpJsonData["api_key"] = apiKey
+		}
+		result["http"] = httpJsonData
 	}
 
 	return result
@@ -397,6 +421,7 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 		}
 
 		reqState.Coord = &parseResult.Coord
+		reqState.HttpData = &parseResult.HttpData
 
 		metaCoord, offset := parseResult.Coord.MetaAndOffset(metatileSize)
 

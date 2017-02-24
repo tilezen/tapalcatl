@@ -182,14 +182,30 @@ func (mp *MuxParser) Parse(req *http.Request) (*ParseResult, error) {
 	var err error
 	var ok bool
 
+	var apiKey string
+	q := req.URL.Query()
+	if apiKeys, ok := q["api_key"]; ok && len(apiKeys) > 0 {
+		apiKey = apiKeys[0]
+	}
+
+	parseResult := &ParseResult{
+		HttpData: HttpRequestData{
+			Path:      req.URL.Path,
+			ApiKey:    apiKey,
+			UserAgent: req.UserAgent(),
+			Referrer:  req.Referer(),
+		},
+	}
+
 	t.Format = m["fmt"]
 	if contentType, ok = mp.mimeMap[t.Format]; !ok {
-		return nil, &ParseError{
+		return parseResult, &ParseError{
 			MimeError: &MimeParseError{
 				BadFormat: t.Format,
 			},
 		}
 	}
+	parseResult.ContentType = contentType
 
 	var coordError CoordParseError
 	z := m["z"]
@@ -211,37 +227,31 @@ func (mp *MuxParser) Parse(req *http.Request) (*ParseResult, error) {
 	}
 
 	if coordError.IsError() {
-		return nil, &ParseError{
+		return parseResult, &ParseError{
 			CoordError: &coordError,
 		}
 	}
 
-	var condition Condition
-	var condError CondParseError
+	parseResult.Coord = t
 
 	ifNoneMatch := req.Header.Get("If-None-Match")
 	if ifNoneMatch != "" {
-		condition.IfNoneMatch = &ifNoneMatch
-	}
-
-	parseResult := ParseResult{
-		Coord:       t,
-		Cond:        condition,
-		ContentType: contentType,
+		parseResult.Cond.IfNoneMatch = &ifNoneMatch
 	}
 
 	ifModifiedSince := req.Header.Get("If-Modified-Since")
 	if ifModifiedSince != "" {
 		parseResult.Cond.IfModifiedSince, err = parseHTTPDates(ifModifiedSince)
 		if err != nil {
-			condError.IfModifiedSinceError = err
-			return &parseResult, &ParseError{
-				CondError: &condError,
+			return parseResult, &ParseError{
+				CondError: &CondParseError{
+					IfModifiedSinceError: err,
+				},
 			}
 		}
 	}
 
-	return &parseResult, nil
+	return parseResult, nil
 }
 
 type OnDemandBufferManager struct{}
