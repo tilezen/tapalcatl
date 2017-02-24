@@ -146,9 +146,20 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	result["response_state"] = reqState.ResponseState.String()
 	result["fetch_state"] = reqState.FetchState.String()
 
-	result["is_zip_error"] = reqState.IsZipError
-	result["is_response_write_error"] = reqState.IsResponseWriteError
-	result["is_cond_error"] = reqState.IsCondError
+	reqStateErrs := make(map[string]bool)
+	if reqState.IsZipError {
+		reqStateErrs["zip"] = true
+	}
+	if reqState.IsResponseWriteError {
+		reqStateErrs["response_write"] = true
+	}
+	if reqState.IsCondError {
+		reqStateErrs["cond"] = true
+	}
+	reqStateErrs["cond"] = true
+	if len(reqStateErrs) > 0 {
+		result["error"] = reqStateErrs
+	}
 
 	if reqState.FetchSize.BodySize > 0 {
 		result["fetch_size"] = map[string]int64{
