@@ -16,6 +16,7 @@ type HttpRequestData struct {
 	ApiKey    string
 	UserAgent string
 	Referrer  string
+	Format    string
 }
 
 type ParseResult struct {
@@ -152,6 +153,7 @@ type RequestState struct {
 	Duration             ReqDuration
 	Coord                *tapalcatl.TileCoord
 	HttpData             *HttpRequestData
+	ResponseSize         int
 }
 
 func convertDurationToMillis(x time.Duration) int64 {
@@ -211,7 +213,7 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	}
 
 	if reqState.HttpData != nil {
-		httpJsonData := make(map[string]string)
+		httpJsonData := make(map[string]interface{})
 		httpJsonData["path"] = reqState.HttpData.Path
 		if userAgent := reqState.HttpData.UserAgent; userAgent != "" {
 			httpJsonData["user_agent"] = userAgent
@@ -221,6 +223,12 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 		}
 		if apiKey := reqState.HttpData.ApiKey; apiKey != "" {
 			httpJsonData["api_key"] = apiKey
+		}
+		if format := reqState.HttpData.Format; format != "" {
+			httpJsonData["format"] = format
+		}
+		if responseSize := reqState.ResponseSize; responseSize > 0 {
+			httpJsonData["response_size"] = responseSize
 		}
 		result["http"] = httpJsonData
 	}
@@ -353,6 +361,13 @@ func (smw *statsdMetricsWriter) Process(reqState *RequestState) {
 	psw.WriteTimer("timers.metatile-find", reqState.Duration.MetatileFind)
 	psw.WriteTimer("timers.response-write", reqState.Duration.RespWrite)
 	psw.WriteTimer("timers.total", reqState.Duration.Total)
+
+	if format := reqState.HttpData.Format; format != "" {
+		psw.WriteCount(fmt.Sprintf("formats.%s", format), 1)
+	}
+	if responseSize := reqState.ResponseSize; responseSize > 0 {
+		psw.WriteGauge("response-size", responseSize)
+	}
 }
 
 func (smw *statsdMetricsWriter) Write(reqState *RequestState) {
@@ -528,7 +543,7 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 		}
 
 		metatileReaderFindStart := time.Now()
-		reader, err := tapalcatl.NewMetatileReader(offset, bytes.NewReader(storageBytes), bodySize)
+		reader, formatSize, err := tapalcatl.NewMetatileReader(offset, bytes.NewReader(storageBytes), bodySize)
 		reqState.Duration.MetatileFind = time.Since(metatileReaderFindStart)
 		if err != nil {
 			metatileReadErrors.Add(1)
@@ -538,6 +553,7 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 			reqState.ResponseState = ResponseState_Error
 			return
 		}
+		reqState.ResponseSize = int(formatSize)
 
 		rw.WriteHeader(http.StatusOK)
 		reqState.ResponseState = ResponseState_Success

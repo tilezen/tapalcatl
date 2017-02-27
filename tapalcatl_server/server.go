@@ -206,6 +206,7 @@ func (mp *MuxParser) Parse(req *http.Request) (*ParseResult, error) {
 		}
 	}
 	parseResult.ContentType = contentType
+	parseResult.HttpData.Format = t.Format
 
 	var coordError CoordParseError
 	z := m["z"]
