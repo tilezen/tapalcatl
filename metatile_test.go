@@ -33,9 +33,12 @@ func TestReadZip(t *testing.T) {
 		t.Fatalf("Unable to make test zip: %s", err.Error())
 	}
 	readerAt := bytes.NewReader(buf.Bytes())
-	jsonReader, err := NewMetatileReader(tile, readerAt, int64(buf.Len()))
+	jsonReader, size, err := NewMetatileReader(tile, readerAt, int64(buf.Len()))
 	if err != nil {
 		t.Fatalf("Unable to read test zip: %s", err.Error())
+	}
+	if size <= 0 {
+		t.Fatalf("Bad size in test zip: %d", size)
 	}
 	tileBuf := new(bytes.Buffer)
 	tileBuf.ReadFrom(jsonReader)
@@ -53,7 +56,7 @@ func TestReadZipMissing(t *testing.T) {
 		t.Fatalf("Unable to make test zip: %s", err.Error())
 	}
 	readerAt := bytes.NewReader(buf.Bytes())
-	_, err = NewMetatileReader(otherTile, readerAt, int64(buf.Len()))
+	_, _, err = NewMetatileReader(otherTile, readerAt, int64(buf.Len()))
 	if err == nil {
 		t.Fatalf("Expected not to find tile in zip, but no error was returned.")
 	}

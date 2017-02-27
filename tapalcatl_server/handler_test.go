@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"github.com/tilezen/tapalcatl"
 	"io"
-	"log"
 	"net/http"
-	"os"
 	"testing"
 	"time"
 )
@@ -73,6 +71,14 @@ func (f *fakeResponseWriter) WriteHeader(status int) {
 	f.status = status
 }
 
+type NilJsonLogger struct{}
+
+func (_ *NilJsonLogger) Log(_ map[string]interface{}, _ ...interface{})    {}
+func (_ *NilJsonLogger) Info(_ string, _ ...interface{})                   {}
+func (_ *NilJsonLogger) Warning(_ LogCategory, _ string, _ ...interface{}) {}
+func (_ *NilJsonLogger) Error(_ LogCategory, _ string, _ ...interface{})   {}
+func (_ *NilJsonLogger) Metrics(_ map[string]interface{})                  {}
+
 func TestHandlerMiss(t *testing.T) {
 	tile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: tile}
@@ -80,8 +86,7 @@ func TestHandlerMiss(t *testing.T) {
 		"json": "application/json",
 	}
 	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*StorageResponse)}
-	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
-	h := MetatileHandler(parser, 1, mimes, storage, &OnDemandBufferManager{}, &nilMetricsWriter{}, logger)
+	h := MetatileHandler(parser, 1, mimes, storage, &OnDemandBufferManager{}, &nilMetricsWriter{}, &NilJsonLogger{})
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}
@@ -142,8 +147,7 @@ func TestHandlerHit(t *testing.T) {
 		},
 	}
 
-	logger := log.New(os.Stdout, "TestHandlerHit", log.LstdFlags)
-	h := MetatileHandler(parser, 1, mimes, storage, &OnDemandBufferManager{}, &nilMetricsWriter{}, logger)
+	h := MetatileHandler(parser, 1, mimes, storage, &OnDemandBufferManager{}, &nilMetricsWriter{}, &NilJsonLogger{})
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}

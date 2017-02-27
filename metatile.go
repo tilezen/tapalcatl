@@ -29,19 +29,20 @@ func (t TileCoord) MetaAndOffset(size int) (meta, offset TileCoord) {
 	return
 }
 
-func NewMetatileReader(t TileCoord, r io.ReaderAt, size int64) (io.ReadCloser, error) {
+func NewMetatileReader(t TileCoord, r io.ReaderAt, size int64) (io.ReadCloser, uint64, error) {
 	z, err := zip.NewReader(r, size)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	target := t.FileName()
 
 	for _, f := range z.File {
 		if f.Name == target {
-			return f.Open()
+			result, err := f.Open()
+			return result, f.UncompressedSize64, err
 		}
 	}
 
-	return nil, fmt.Errorf("Unable to find relative tile offset %#v in metatile.", target)
+	return nil, 0, fmt.Errorf("Unable to find relative tile offset %#v in metatile.", target)
 }
