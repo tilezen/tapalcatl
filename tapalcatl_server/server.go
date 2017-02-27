@@ -460,11 +460,10 @@ func main() {
 	r.HandleFunc("/debug/vars", expvar_func).Methods("GET")
 
 	corsHandler := handlers.CORS()(r)
-	logHandler := handlers.CombinedLoggingHandler(os.Stdout, corsHandler)
 
 	logger.Info("Server started and listening on %s\n", listen)
 
-	systemLogger.Fatal(http.ListenAndServe(listen, logHandler))
+	systemLogger.Fatal(http.ListenAndServe(listen, corsHandler))
 }
 
 func getHealth(rw http.ResponseWriter, _ *http.Request) {
