@@ -38,7 +38,7 @@ func sizeToZoom(v uint) uint {
 	var i int
 
 	for i = 4; i >= 0; i-- {
-		if v & b[i] != 0 {
+		if (v & b[i]) != 0 {
 			v >>= S[i]
 			r |= S[i]
 		}
