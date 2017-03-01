@@ -177,7 +177,6 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	if reqState.IsCondError {
 		reqStateErrs["cond"] = true
 	}
-	reqStateErrs["cond"] = true
 	if len(reqStateErrs) > 0 {
 		result["error"] = reqStateErrs
 	}
