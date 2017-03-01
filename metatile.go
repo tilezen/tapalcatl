@@ -15,10 +15,10 @@ func (t TileCoord) FileName() string {
 	return fmt.Sprintf("%d/%d/%d.%s", t.Z, t.X, t.Y, t.Format)
 }
 
-// isPowerOfTwo return true when the given integer is a power of two.
+// IsPowerOfTwo return true when the given integer is a power of two.
 // See https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 // for details.
-func isPowerOfTwo(i int) bool {
+func IsPowerOfTwo(i int) bool {
 	if i > 0 {
 		return (i & (i - 1)) == 0
 	}
@@ -57,11 +57,11 @@ func sizeToZoom(v uint) uint {
 // call MetaAndOffset(2, 2).
 func (t TileCoord) MetaAndOffset(metaSize, tileSize int) (meta, offset TileCoord, err error) {
 	// check that sizes are powers of two before proceeding.
-	if !isPowerOfTwo(metaSize) {
+	if !IsPowerOfTwo(metaSize) {
 		err = fmt.Errorf("Metatile size is required to be a power of two, but %d is not.", metaSize)
 		return
 	}
-	if !isPowerOfTwo(tileSize) {
+	if !IsPowerOfTwo(tileSize) {
 		err = fmt.Errorf("Tile size is required to be a power of two, but %d is not.", tileSize)
 		return
 	}

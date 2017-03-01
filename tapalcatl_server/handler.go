@@ -401,7 +401,7 @@ func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger Json
 	return smw
 }
 
-func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger JsonLogger) http.Handler {
+func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger JsonLogger) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 
@@ -471,7 +471,7 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 		reqState.Coord = &parseResult.Coord
 		reqState.HttpData = &parseResult.HttpData
 
-		metaCoord, offset, err := parseResult.Coord.MetaAndOffset(metatileSize, 1)
+		metaCoord, offset, err := parseResult.Coord.MetaAndOffset(metatileSize, tileSize)
 		if err != nil {
 			configErrors.Add(1)
 			logger.Warning(LogCategory_ConfigError, "MetaAndOffset could not be calculated: %s", err.Error())
