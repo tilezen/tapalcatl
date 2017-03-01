@@ -97,6 +97,7 @@ const (
 	FetchState_NotFound
 	FetchState_FetchError
 	FetchState_ReadError
+	FetchState_ConfigError
 	FetchState_Count
 )
 
@@ -112,6 +113,8 @@ func (rfs ReqFetchState) String() string {
 		return "fetcherr"
 	case FetchState_ReadError:
 		return "readerr"
+	case FetchState_ConfigError:
+		return "configerr"
 	default:
 		return "unknown"
 	}
@@ -468,7 +471,14 @@ func MetatileHandler(p Parser, metatileSize int, mimeMap map[string]string, stor
 		reqState.Coord = &parseResult.Coord
 		reqState.HttpData = &parseResult.HttpData
 
-		metaCoord, offset := parseResult.Coord.MetaAndOffset(metatileSize)
+		metaCoord, offset, err := parseResult.Coord.MetaAndOffset(metatileSize, 1)
+		if err != nil {
+			configErrors.Add(1)
+			logger.Warning(LogCategory_ConfigError, "MetaAndOffset could not be calculated: %s", err.Error())
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			reqState.ResponseState = ResponseState_Error
+			return
+		}
 
 		storageFetchStart := time.Now()
 		storageResult, err := storage.Fetch(metaCoord, parseResult.Cond)
