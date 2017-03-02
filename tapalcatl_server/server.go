@@ -36,6 +36,9 @@ type storageDefinition struct {
 	// these can be overridden in specific storage configuration
 	MetatileSize int
 
+	// TileSize indicates the size of tile for this pattern. The default is 1.
+	TileSize *int
+
 	// s3 specific fields
 	Layer      string
 	Bucket     string
@@ -56,6 +59,9 @@ type storageConfig struct {
 	Type_ string `json:"type"`
 
 	MetatileSize *int
+
+	// TileSize indicates the size of tile for this pattern. The default is 1.
+	TileSize *int
 
 	// Prefix is required to be set for s3 storage
 	Prefix     *string
@@ -295,15 +301,17 @@ func main() {
    }
    Storage { key -> storage definition mapping
      storage name (type) string -> {
-     	 MetatileSize int      Number of tiles in each dimension of the metatile.
+        MetatileSize int      Number of 256px tiles in each dimension of the metatile.
+
+        TileSize int        Size of tile in 256px tile units.
 
        (s3 storage)
-    	 Layer      string   Name of layer to use in this bucket. Only relevant for s3.
-    	 Bucket     string   Name of S3 bucket to fetch from.
-       KeyPattern string   Pattern to fill with variables from the main pattern to make the S3 key.
+        Layer      string   Name of layer to use in this bucket. Only relevant for s3.
+        Bucket     string   Name of S3 bucket to fetch from.
+        KeyPattern string   Pattern to fill with variables from the main pattern to make the S3 key.
 
        (file storage)
-       BaseDir    string   Base directory to look for files under.
+        BaseDir    string   Base directory to look for files under.
      }
    }
    Pattern { request pattern -> storage configuration mapping
@@ -381,6 +389,19 @@ func main() {
 		if sc.MetatileSize != nil {
 			metatileSize = *sc.MetatileSize
 		}
+		if !tapalcatl.IsPowerOfTwo(metatileSize) {
+			logFatalCfgErr(logger, "Metatile size must be power of two, but %d is not", metatileSize)
+		}
+		tileSize := 1
+		if sd.TileSize != nil {
+			tileSize = *sd.TileSize
+		}
+		if sc.TileSize != nil {
+			tileSize = *sc.TileSize
+		}
+		if !tapalcatl.IsPowerOfTwo(tileSize) {
+			logFatalCfgErr(logger, "Tile size must be power of two, but %d is not", tileSize)
+		}
 		layer := sd.Layer
 		if sc.Layer != nil {
 			layer = *sc.Layer
@@ -443,7 +464,7 @@ func main() {
 			mimeMap: hc.Mime,
 		}
 
-		h := MetatileHandler(parser, metatileSize, hc.Mime, storage, bufferManager, mw, logger)
+		h := MetatileHandler(parser, metatileSize, tileSize, hc.Mime, storage, bufferManager, mw, logger)
 		gzipped := gziphandler.GzipHandler(h)
 
 		r.Handle(reqPattern, gzipped).Methods("GET")

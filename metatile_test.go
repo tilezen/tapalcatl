@@ -77,30 +77,38 @@ func coordEquals(t *testing.T, name string, exp, act TileCoord) {
 	}
 }
 
-func checkMetaOffset(t *testing.T, size int, coord, exp_meta, exp_offset TileCoord) {
-	meta, offset := coord.MetaAndOffset(size)
+func checkMetaOffset(t *testing.T, metaSize, tileSize int, coord, exp_meta, exp_offset TileCoord) {
+	meta, offset, err := coord.MetaAndOffset(metaSize, tileSize)
+	if err != nil {
+		t.Fatalf("Expected result from MetaAndOffset, but got error: %s", err.Error())
+	}
 	coordEquals(t, "meta", exp_meta, meta)
 	coordEquals(t, "offset", exp_offset, offset)
 }
 
 func TestMetaOffset(t *testing.T) {
-	checkMetaOffset(t, 1,
+	checkMetaOffset(t, 1, 1,
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
 
-	checkMetaOffset(t, 1,
+	checkMetaOffset(t, 1, 1,
 		TileCoord{Z: 12, X: 637, Y: 936, Format: "json"},
 		TileCoord{Z: 12, X: 637, Y: 936, Format: "zip"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
 
-	checkMetaOffset(t, 2,
+	checkMetaOffset(t, 2, 1,
 		TileCoord{Z: 12, X: 637, Y: 936, Format: "json"},
-		TileCoord{Z: 12, X: 636, Y: 936, Format: "zip"},
-		TileCoord{Z: 0, X: 1, Y: 0, Format: "json"})
+		TileCoord{Z: 11, X: 318, Y: 468, Format: "zip"},
+		TileCoord{Z: 1, X: 1, Y: 0, Format: "json"})
 
-	checkMetaOffset(t, 8,
+	checkMetaOffset(t, 2, 2,
+		TileCoord{Z: 12, X: 637, Y: 936, Format: "json"},
+		TileCoord{Z: 12, X: 637, Y: 936, Format: "zip"},
+		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
+
+	checkMetaOffset(t, 8, 1,
 		TileCoord{Z: 12, X: 637, Y: 935, Format: "json"},
-		TileCoord{Z: 12, X: 632, Y: 928, Format: "zip"},
-		TileCoord{Z: 0, X: 5, Y: 7, Format: "json"})
+		TileCoord{Z: 9, X: 79, Y: 116, Format: "zip"},
+		TileCoord{Z: 3, X: 5, Y: 7, Format: "json"})
 }

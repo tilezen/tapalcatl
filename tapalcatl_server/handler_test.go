@@ -86,7 +86,7 @@ func TestHandlerMiss(t *testing.T) {
 		"json": "application/json",
 	}
 	storage := &fakeStorage{storage: make(map[tapalcatl.TileCoord]*StorageResponse)}
-	h := MetatileHandler(parser, 1, mimes, storage, &OnDemandBufferManager{}, &nilMetricsWriter{}, &NilJsonLogger{})
+	h := MetatileHandler(parser, 1, 1, mimes, storage, &OnDemandBufferManager{}, &nilMetricsWriter{}, &NilJsonLogger{})
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}
@@ -147,7 +147,7 @@ func TestHandlerHit(t *testing.T) {
 		},
 	}
 
-	h := MetatileHandler(parser, 1, mimes, storage, &OnDemandBufferManager{}, &nilMetricsWriter{}, &NilJsonLogger{})
+	h := MetatileHandler(parser, 1, 1, mimes, storage, &OnDemandBufferManager{}, &nilMetricsWriter{}, &NilJsonLogger{})
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{}
