@@ -328,22 +328,20 @@ func (smw *statsdMetricsWriter) Process(reqState *RequestState) {
 
 	psw.WriteCount("count", 1)
 
-	respStateInt := int32(reqState.ResponseState)
-	if respStateInt > 0 && respStateInt < int32(ResponseState_Count) {
+	if reqState.ResponseState > ResponseState_Nil && reqState.ResponseState < ResponseState_Count {
 		respStateName := reqState.ResponseState.String()
 		respMetricName := fmt.Sprintf("responsestate.%s", respStateName)
 		psw.WriteCount(respMetricName, 1)
 	} else {
-		smw.logger.Error(LogCategory_InvalidCodeState, "Invalid response state: %s", reqState.ResponseState)
+		smw.logger.Error(LogCategory_InvalidCodeState, "Invalid response state: %d", int32(reqState.ResponseState))
 	}
 
-	fetchStateInt := int32(reqState.FetchState)
-	if fetchStateInt > 0 && fetchStateInt < int32(FetchState_Count) {
+	if reqState.FetchState > FetchState_Nil && reqState.FetchState < FetchState_Count {
 		fetchStateName := reqState.FetchState.String()
 		fetchMetricName := fmt.Sprintf("fetchstate.%s", fetchStateName)
 		psw.WriteCount(fetchMetricName, 1)
-	} else {
-		smw.logger.Error(LogCategory_InvalidCodeState, "Invalid fetch state: %s", reqState.ResponseState)
+	} else if reqState.FetchState != FetchState_Nil {
+		smw.logger.Error(LogCategory_InvalidCodeState, "Invalid fetch state: %d", int32(reqState.FetchState))
 	}
 
 	if reqState.FetchSize.BodySize > 0 {
@@ -477,6 +475,7 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 			logger.Warning(LogCategory_ConfigError, "MetaAndOffset could not be calculated: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			reqState.ResponseState = ResponseState_Error
+			// Note: FetchState is left as nil, since no fetch was performed
 			return
 		}
 
