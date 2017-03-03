@@ -362,8 +362,10 @@ func (smw *statsdMetricsWriter) Process(reqState *RequestState) {
 	psw.WriteTimer("timers.response-write", reqState.Duration.RespWrite)
 	psw.WriteTimer("timers.total", reqState.Duration.Total)
 
-	if format := reqState.HttpData.Format; format != "" {
-		psw.WriteCount(fmt.Sprintf("formats.%s", format), 1)
+	if reqState.HttpData != nil {
+		if format := reqState.HttpData.Format; format != "" {
+			psw.WriteCount(fmt.Sprintf("formats.%s", format), 1)
+		}
 	}
 	if responseSize := reqState.ResponseSize; responseSize > 0 {
 		psw.WriteGauge("response-size", responseSize)
