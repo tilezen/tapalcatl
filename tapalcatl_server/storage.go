@@ -120,6 +120,13 @@ func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse,
 	return result, nil
 }
 
+func (s *S3Storage) healthCheck() (error) {
+	key := "sanity_check.txt"
+	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &key}
+	output, err := s.client.GetObject(input)
+	return err
+}
+
 type FileStorage struct {
 	baseDir string
 	layer   string
@@ -153,4 +160,10 @@ func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageRespons
 		}
 		return resp, nil
 	}
+}
+
+func (s *FileStorage) healthCheck() (error) {
+	tilepath := filepath.Join(f.baseDir, "sanity_check.txt")
+	file, err := os.Open(tilepath)
+	return err
 }

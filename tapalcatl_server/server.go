@@ -471,6 +471,11 @@ func main() {
 			logFatalCfgErr(logger, "Unknown storage type: %s", sd.Type)
 		}
 
+		storage_err := storage.healthCheck()
+		if (storage_err) {
+			logger.Warn("Healthcheck failed on storage: %s", storage_err)
+		}
+
 		parser := &MuxParser{
 			mimeMap: hc.Mime,
 		}
@@ -482,7 +487,8 @@ func main() {
 	}
 
 	if len(healthcheck) > 0 {
-		r.HandleFunc(healthcheck, getHealth).Methods("GET")
+		hc := HealthcheckHandler(storage)
+		r.HandleFunc(healthcheck, hc).Methods("GET")
 	}
 
 	if expVarsServe {
@@ -509,8 +515,4 @@ func main() {
 	logger.Info("Server started and listening on %s\n", listen)
 
 	systemLogger.Fatal(http.ListenAndServe(listen, corsHandler))
-}
-
-func getHealth(rw http.ResponseWriter, _ *http.Request) {
-	rw.WriteHeader(200)
 }
