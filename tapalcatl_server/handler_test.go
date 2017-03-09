@@ -78,6 +78,7 @@ func (_ *NilJsonLogger) Info(_ string, _ ...interface{})                   {}
 func (_ *NilJsonLogger) Warning(_ LogCategory, _ string, _ ...interface{}) {}
 func (_ *NilJsonLogger) Error(_ LogCategory, _ string, _ ...interface{})   {}
 func (_ *NilJsonLogger) Metrics(_ map[string]interface{})                  {}
+func (_ *NilJsonLogger) ExpVars()                                          {}
 
 func TestHandlerMiss(t *testing.T) {
 	tile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
