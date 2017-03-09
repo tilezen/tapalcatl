@@ -155,7 +155,7 @@ type RequestState struct {
 	IsCondError          bool
 	Duration             ReqDuration
 	Coord                *tapalcatl.TileCoord
-	HttpData             *HttpRequestData
+	HttpData             HttpRequestData
 	ResponseSize         int
 }
 
@@ -167,8 +167,26 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 
 	result := make(map[string]interface{})
 
-	result["response_state"] = reqState.ResponseState.AsStatusCode()
-	result["fetch_state"] = reqState.FetchState.String()
+	if reqState.FetchState > FetchState_Nil {
+		fetchResult := make(map[string]interface{})
+
+		fetchResult["state"] = reqState.FetchState.String()
+
+		if reqState.FetchSize.BodySize > 0 {
+			fetchResult["size"] = map[string]int64{
+				"body":      reqState.FetchSize.BodySize,
+				"bytes_len": reqState.FetchSize.BytesLength,
+				"bytes_cap": reqState.FetchSize.BytesCap,
+			}
+		}
+
+		fetchResult["metadata"] = map[string]bool{
+			"has_last_modified": reqState.StorageMetadata.HasLastModified,
+			"has_etag":          reqState.StorageMetadata.HasEtag,
+		}
+
+		result["fetch"] = fetchResult
+	}
 
 	reqStateErrs := make(map[string]bool)
 	if reqState.IsZipError {
@@ -184,20 +202,7 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 		result["error"] = reqStateErrs
 	}
 
-	if reqState.FetchSize.BodySize > 0 {
-		result["fetch_size"] = map[string]int64{
-			"body_size":    reqState.FetchSize.BodySize,
-			"bytes_length": reqState.FetchSize.BytesLength,
-			"bytes_cap":    reqState.FetchSize.BytesCap,
-		}
-	}
-
-	result["storageMetadata"] = map[string]bool{
-		"has_last_modified": reqState.StorageMetadata.HasLastModified,
-		"has_etag":          reqState.StorageMetadata.HasEtag,
-	}
-
-	result["duration"] = map[string]int64{
+	result["timing"] = map[string]int64{
 		"parse":         convertDurationToMillis(reqState.Duration.Parse),
 		"storage_fetch": convertDurationToMillis(reqState.Duration.StorageFetch),
 		"storage_read":  convertDurationToMillis(reqState.Duration.StorageRead),
@@ -214,26 +219,25 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 		}
 	}
 
-	if reqState.HttpData != nil {
-		httpJsonData := make(map[string]interface{})
-		httpJsonData["path"] = reqState.HttpData.Path
-		if userAgent := reqState.HttpData.UserAgent; userAgent != "" {
-			httpJsonData["user_agent"] = userAgent
-		}
-		if referrer := reqState.HttpData.Referrer; referrer != "" {
-			httpJsonData["referer"] = referrer
-		}
-		if apiKey := reqState.HttpData.ApiKey; apiKey != "" {
-			httpJsonData["api_key"] = apiKey
-		}
-		if format := reqState.HttpData.Format; format != "" {
-			httpJsonData["format"] = format
-		}
-		if responseSize := reqState.ResponseSize; responseSize > 0 {
-			httpJsonData["response_size"] = responseSize
-		}
-		result["http"] = httpJsonData
+	httpJsonData := make(map[string]interface{})
+	httpJsonData["path"] = reqState.HttpData.Path
+	if userAgent := reqState.HttpData.UserAgent; userAgent != "" {
+		httpJsonData["user_agent"] = userAgent
 	}
+	if referrer := reqState.HttpData.Referrer; referrer != "" {
+		httpJsonData["referer"] = referrer
+	}
+	if apiKey := reqState.HttpData.ApiKey; apiKey != "" {
+		httpJsonData["api_key"] = apiKey
+	}
+	if format := reqState.HttpData.Format; format != "" {
+		httpJsonData["format"] = format
+	}
+	if responseSize := reqState.ResponseSize; responseSize > 0 {
+		httpJsonData["response_size"] = responseSize
+	}
+	httpJsonData["status"] = reqState.ResponseState.AsStatusCode()
+	result["http"] = httpJsonData
 
 	return result
 }
@@ -362,10 +366,8 @@ func (smw *statsdMetricsWriter) Process(reqState *RequestState) {
 	psw.WriteTimer("timers.response-write", reqState.Duration.RespWrite)
 	psw.WriteTimer("timers.total", reqState.Duration.Total)
 
-	if reqState.HttpData != nil {
-		if format := reqState.HttpData.Format; format != "" {
-			psw.WriteCount(fmt.Sprintf("formats.%s", format), 1)
-		}
+	if format := reqState.HttpData.Format; format != "" {
+		psw.WriteCount(fmt.Sprintf("formats.%s", format), 1)
 	}
 	if responseSize := reqState.ResponseSize; responseSize > 0 {
 		psw.WriteGauge("response-size", responseSize)
@@ -468,7 +470,7 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 		}
 
 		reqState.Coord = &parseResult.Coord
-		reqState.HttpData = &parseResult.HttpData
+		reqState.HttpData = parseResult.HttpData
 
 		metaCoord, offset, err := parseResult.Coord.MetaAndOffset(metatileSize, tileSize)
 		if err != nil {
