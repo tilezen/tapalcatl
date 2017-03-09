@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"expvar"
 	"fmt"
 	"log"
 )
@@ -25,6 +27,7 @@ const (
 	LogCategory_ResponseError
 	LogCategory_ConfigError
 	LogCategory_Metrics
+	LogCategory_ExpVars
 )
 
 func (lc LogCategory) String() string {
@@ -47,6 +50,8 @@ func (lc LogCategory) String() string {
 		return "config"
 	case LogCategory_Metrics:
 		return "metrics"
+	case LogCategory_ExpVars:
+		return "expvars"
 	}
 	panic(fmt.Sprintf("Unknown json category: %d\n", int32(lc)))
 }
@@ -59,6 +64,9 @@ type JsonLogger interface {
 
 	// for logging metrics specifically
 	Metrics(map[string]interface{})
+
+	// for logging expvars specifically
+	ExpVars()
 
 	// allows adding more metadata, and will remain *mostly*
 	// unperturbed, will add minimal supplemental metadata before logging
@@ -109,6 +117,29 @@ func (l *JsonLoggerImpl) Metrics(metricsData map[string]interface{}) {
 	metricsData["type"] = "info"
 	metricsData["category"] = LogCategory_Metrics.String()
 	l.Log(metricsData)
+}
+
+func (l *JsonLoggerImpl) ExpVars() {
+
+	// The issue here is that getting the value of the Vars returns back
+	// the json encoded representation (eg strings have "" around them). So
+	// if we stick that in a map and call json.Marshal on it, it'll escape
+	// those. This is why we manually generate the json here, instead of
+	// creating a map and calling Log on it like the other paths.
+
+	var buffer bytes.Buffer
+	buffer.WriteString("{")
+	first := true
+	expvar.Do(func(kv expvar.KeyValue) {
+		if first {
+			first = false
+		} else {
+			buffer.WriteString(",")
+		}
+		fmt.Fprintf(&buffer, "\"%s\":%s", kv.Key, kv.Value.String())
+	})
+	buffer.WriteString("}")
+	l.Logger.Printf("{\"type\":\"info\",\"category\":\"%s\",\"expvars\":%s}\n", LogCategory_ExpVars.String(), buffer.String())
 }
 
 func NewJsonLogger(logger *log.Logger, hostname string) JsonLogger {
