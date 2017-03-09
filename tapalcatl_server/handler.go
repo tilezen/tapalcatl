@@ -580,15 +580,25 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 	})
 }
 
-func HealthcheckHandler(storage Storage) http.Handler {
+func HealthcheckHandler(storages []Storage, logger JsonLogger) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		storage_err := storage.healthCheck()
-		if storage_err != nil {
-			logger.Error("Healthcheck on storage failed: %s", storage_err)
-			rw.WriteHeader(500)
-		} else {
+		healthy := true
+
+		for _, storage := range storages {
+			storage_err := storage.Healthcheck()
+
+			if storage_err != nil {
+				logger.Error(LogCategory_StorageError, "Healthcheck on storage %s failed: %s", storage, storage_err.Error())
+				healthy = false
+				break
+			}
+		}
+
+		if healthy == true {
 			rw.WriteHeader(200)
+		} else {
+			rw.WriteHeader(500)
 		}
 	})
 }

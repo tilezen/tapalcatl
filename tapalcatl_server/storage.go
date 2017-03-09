@@ -34,6 +34,7 @@ type StorageResponse struct {
 
 type Storage interface {
 	Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error)
+	Healthcheck() (error)
 }
 
 type S3Storage struct {
@@ -42,15 +43,17 @@ type S3Storage struct {
 	keyPattern string
 	prefix     string
 	layer      string
+	healthcheck string
 }
 
-func NewS3Storage(api s3iface.S3API, bucket, keyPattern, prefix, layer string) *S3Storage {
+func NewS3Storage(api s3iface.S3API, bucket, keyPattern, prefix, layer string, healthcheck string) *S3Storage {
 	return &S3Storage{
 		client:     api,
 		bucket:     bucket,
 		keyPattern: keyPattern,
 		prefix:     prefix,
 		layer:      layer,
+		healthcheck: healthcheck,
 	}
 }
 
@@ -120,22 +123,23 @@ func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse,
 	return result, nil
 }
 
-func (s *S3Storage) healthCheck() (error) {
-	key := "sanity_check.txt"
-	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &key}
-	output, err := s.client.GetObject(input)
+func (s *S3Storage) Healthcheck() (error) {
+	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &s.healthcheck}
+	_, err := s.client.GetObject(input)
 	return err
 }
 
 type FileStorage struct {
 	baseDir string
 	layer   string
+	healthcheck string
 }
 
-func NewFileStorage(baseDir, layer string) *FileStorage {
+func NewFileStorage(baseDir, layer string, healthcheck string) *FileStorage {
 	return &FileStorage{
 		baseDir: baseDir,
 		layer:   layer,
+		healthcheck: healthcheck,
 	}
 }
 
@@ -162,8 +166,8 @@ func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageRespons
 	}
 }
 
-func (s *FileStorage) healthCheck() (error) {
-	tilepath := filepath.Join(f.baseDir, "sanity_check.txt")
-	file, err := os.Open(tilepath)
+func (s *FileStorage) Healthcheck() (error) {
+	tilepath := filepath.Join(s.baseDir, s.healthcheck)
+	_, err := os.Open(tilepath)
 	return err
 }

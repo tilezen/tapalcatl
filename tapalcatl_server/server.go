@@ -45,6 +45,9 @@ type storageDefinition struct {
 	// TileSize indicates the size of tile for this pattern. The default is 1.
 	TileSize *int
 
+	// S3 key or file path to check for during healthcheck
+	Healthcheck string
+
 	// s3 specific fields
 	Layer      string
 	Bucket     string
@@ -312,9 +315,11 @@ func main() {
         Layer      string   Name of layer to use in this bucket. Only relevant for s3.
         Bucket     string   Name of S3 bucket to fetch from.
         KeyPattern string   Pattern to fill with variables from the main pattern to make the S3 key.
+        Healthcheck string Name of S3 key to use when querying health of S3 system.
 
        (file storage)
         BaseDir    string   Base directory to look for files under.
+        Healthcheck string  Path to a file (inside BaseDir) when querying health of system.
      }
    }
    Pattern { request pattern -> storage configuration mapping
@@ -330,7 +335,7 @@ func main() {
 `)
 	f.StringVar(&listen, "listen", ":8080", "interface and port to listen on")
 	f.String("config", "", "Config file to read values from.")
-	f.StringVar(&healthcheck, "healthcheck", "", "A path to respond to with a blank 200 OK. Intended for use by load balancer health checks.")
+	f.StringVar(&healthcheck, "healthcheck", "", "A URL path for healthcheck. Intended for use by load balancer health checks.")
 	f.StringVar(&debugHost, "debugHost", "", "IP address of remote debug host allowed to read expvars at /debug/vars.")
 
 	f.IntVar(&poolNumEntries, "poolnumentries", 0, "Number of buffers to pool.")
@@ -391,6 +396,9 @@ func main() {
 			logFatalCfgErr(logger, "Unknown storage type: %s", t)
 		}
 	}
+
+	// keep track of the storages so we can healthcheck them
+	var storages []Storage
 
 	// create the storage implementations and handler routes for patterns
 	var storage Storage
@@ -457,24 +465,34 @@ func main() {
 				logFatalCfgErr(logger, "S3 storage missing key pattern")
 			}
 
+			if sd.Healthcheck == "" {
+				logger.Warning(LogCategory_ConfigError, "Missing healthcheck for storage s3")
+			}
+
 			s3Client := s3.New(awsSession)
-			storage = NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer)
+			storage = NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer, sd.Healthcheck)
 
 		case "file":
 			if sd.BaseDir == "" {
 				logFatalCfgErr(logger, "File storage missing base dir")
 			}
 
-			storage = NewFileStorage(sd.BaseDir, layer)
+			if sd.Healthcheck == "" {
+				logger.Warning(LogCategory_ConfigError, "Missing healthcheck for storage file")
+			}
+
+			storage = NewFileStorage(sd.BaseDir, layer, sd.Healthcheck)
 
 		default:
 			logFatalCfgErr(logger, "Unknown storage type: %s", sd.Type)
 		}
 
-		storage_err := storage.healthCheck()
-		if (storage_err) {
-			logger.Warn("Healthcheck failed on storage: %s", storage_err)
+		storage_err := storage.Healthcheck()
+		if storage_err != nil {
+			logger.Warning(LogCategory_ConfigError, "Healthcheck failed on storage: %s", storage_err)
 		}
+
+		storages = append(storages, storage)
 
 		parser := &MuxParser{
 			mimeMap: hc.Mime,
@@ -487,8 +505,8 @@ func main() {
 	}
 
 	if len(healthcheck) > 0 {
-		hc := HealthcheckHandler(storage)
-		r.HandleFunc(healthcheck, hc).Methods("GET")
+		hc := HealthcheckHandler(storages, logger)
+		r.Handle(healthcheck, hc).Methods("GET")
 	}
 
 	if expVarsServe {
