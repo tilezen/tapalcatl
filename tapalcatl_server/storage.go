@@ -34,7 +34,7 @@ type StorageResponse struct {
 
 type Storage interface {
 	Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error)
-	Healthcheck() (error)
+	HealthCheck() error
 }
 
 type S3Storage struct {
@@ -123,7 +123,7 @@ func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse,
 	return result, nil
 }
 
-func (s *S3Storage) Healthcheck() (error) {
+func (s *S3Storage) HealthCheck() error {
 	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &s.healthcheck}
 	_, err := s.client.GetObject(input)
 	return err
@@ -166,7 +166,7 @@ func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageRespons
 	}
 }
 
-func (s *FileStorage) Healthcheck() (error) {
+func (s *FileStorage) HealthCheck() error {
 	tilepath := filepath.Join(s.baseDir, s.healthcheck)
 	_, err := os.Open(tilepath)
 	return err

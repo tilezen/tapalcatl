@@ -487,7 +487,7 @@ func main() {
 			logFatalCfgErr(logger, "Unknown storage type: %s", sd.Type)
 		}
 
-		storage_err := storage.Healthcheck()
+		storage_err := storage.HealthCheck()
 		if storage_err != nil {
 			logger.Warning(LogCategory_ConfigError, "Healthcheck failed on storage: %s", storage_err)
 		}
@@ -505,7 +505,7 @@ func main() {
 	}
 
 	if len(healthcheck) > 0 {
-		hc := HealthcheckHandler(storages, logger)
+		hc := HealthCheckHandler(storages, logger)
 		r.Handle(healthcheck, hc).Methods("GET")
 	}
 
