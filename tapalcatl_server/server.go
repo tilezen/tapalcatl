@@ -279,6 +279,8 @@ func main() {
 	var listen, healthcheck, debugHost string
 	var poolNumEntries, poolEntrySize int
 	var metricsStatsdAddr, metricsStatsdPrefix string
+	var expVarsServe bool
+	var expVarsLogIntervalSeconds int
 
 	hc := handlerConfig{}
 
@@ -335,6 +337,9 @@ func main() {
 
 	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
 	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
+
+	f.BoolVar(&expVarsServe, "expvar-serve", false, "whether to serve expvars at /debug/vars")
+	f.IntVar(&expVarsLogIntervalSeconds, "expvar-log-interval", 0, "seconds to log expvars, 0 disables")
 
 	err = f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
@@ -474,12 +479,24 @@ func main() {
 		r.HandleFunc(healthcheck, getHealth).Methods("GET")
 	}
 
-	// serve expvar stats to localhost and debugHost
-	expvar_func, err := stats.HandlerFunc(debugHost)
-	if err != nil {
-		logFatalCfgErr(logger, "Failed to initialize stats.HandlerFunc: %s", err.Error())
+	if expVarsServe {
+		// serve expvar stats to localhost and debugHost
+		expvar_func, err := stats.HandlerFunc(debugHost)
+		if err != nil {
+			logFatalCfgErr(logger, "Failed to initialize stats.HandlerFunc: %s", err.Error())
+		}
+		r.HandleFunc("/debug/vars", expvar_func).Methods("GET")
 	}
-	r.HandleFunc("/debug/vars", expvar_func).Methods("GET")
+
+	if expVarsLogIntervalSeconds > 0 {
+		// log the expvar stats periodically
+		ticker := time.NewTicker(time.Second * time.Duration(expVarsLogIntervalSeconds))
+		go func(c <-chan time.Time, l JsonLogger) {
+			for _ = range c {
+				logger.ExpVars()
+			}
+		}(ticker.C, logger)
+	}
 
 	corsHandler := handlers.CORS()(r)
 
