@@ -26,12 +26,18 @@ import (
 // storageDefinition contains the base options for a particular storage
 // storageConfig contains the specific options for a particular pattern
 // pattern ties together request patterns with storageConfig
-// the storageConfig "Type_" needs to match the key mapping names in Storage
 // awsConfig contains session-wide options for aws backed storage
 
-// "s3" and "file" are possible storage definitions
+// "s3" and "file" are the possible storage definition types
+
+// generic aws configuration applied to whole session
+type awsConfig struct {
+	Region *string
+}
 
 type storageDefinition struct {
+	Type string
+
 	// common fields across all storage types
 	// these can be overridden in specific storage configuration
 	MetatileSize int
@@ -48,15 +54,10 @@ type storageDefinition struct {
 	BaseDir string
 }
 
-// generic aws configuration applied to whole session
-type awsConfig struct {
-	Region *string
-}
-
 // storage configuration, specific to a pattern
 type storageConfig struct {
-	// should match storage definition name, "s3" or "file"
-	Type_ string `json:"type"`
+	// matches storage definition name
+	Storage string
 
 	MetatileSize *int
 
@@ -302,9 +303,9 @@ func main() {
      Region string Name of aws region
    }
    Storage { key -> storage definition mapping
-     storage name (type) string -> {
+     storage name string -> {
+        Type string storage type, can be "s3" or "file
         MetatileSize int      Number of 256px tiles in each dimension of the metatile.
-
         TileSize int        Size of tile in 256px tile units.
 
        (s3 storage)
@@ -318,7 +319,7 @@ func main() {
    }
    Pattern { request pattern -> storage configuration mapping
      request pattern string -> {
-       type string Name of storage defintion to use
+       storage string Name of storage defintion to use
        list of optional storage configuration to use:
        prefix is required for s3, others are optional overrides of relevant definition
      	 Prefix string  Prefix to use in this bucket.
@@ -381,14 +382,24 @@ func main() {
 	// set if we have s3 storage configured, and shared across all s3 sessions
 	var awsSession *session.Session
 
+	for _, sd := range hc.Storage {
+		t := sd.Type
+		switch t {
+		case "s3":
+		case "file":
+		default:
+			logFatalCfgErr(logger, "Unknown storage type: %s", t)
+		}
+	}
+
 	// create the storage implementations and handler routes for patterns
 	var storage Storage
 	for reqPattern, sc := range hc.Pattern {
 
-		t := sc.Type_
-		sd, ok := hc.Storage[t]
+		storageDefinitionName := sc.Storage
+		sd, ok := hc.Storage[storageDefinitionName]
 		if !ok {
-			logFatalCfgErr(logger, "Missing storage definition: %s", t)
+			logFatalCfgErr(logger, "Unknown storage definition: %s", storageDefinitionName)
 		}
 		metatileSize := sd.MetatileSize
 		if sc.MetatileSize != nil {
@@ -412,10 +423,10 @@ func main() {
 			layer = *sc.Layer
 		}
 		if layer == "" {
-			logFatalCfgErr(logger, "Missing layer for storage: %s", t)
+			logFatalCfgErr(logger, "Missing layer for storage: %s", storageDefinitionName)
 		}
 
-		switch t {
+		switch sd.Type {
 		case "s3":
 			if sc.Prefix == nil {
 				logFatalCfgErr(logger, "S3 configuration requires prefix")
@@ -450,11 +461,6 @@ func main() {
 			storage = NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer)
 
 		case "file":
-			sd, ok := hc.Storage[t]
-			if !ok {
-				logFatalCfgErr(logger, "Missing file storage definition")
-			}
-
 			if sd.BaseDir == "" {
 				logFatalCfgErr(logger, "File storage missing base dir")
 			}
@@ -462,7 +468,7 @@ func main() {
 			storage = NewFileStorage(sd.BaseDir, layer)
 
 		default:
-			logFatalCfgErr(logger, "Unknown storage %s", t)
+			logFatalCfgErr(logger, "Unknown storage type: %s", sd.Type)
 		}
 
 		parser := &MuxParser{
