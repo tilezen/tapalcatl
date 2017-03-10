@@ -54,6 +54,10 @@ func (f *fakeStorage) Fetch(t tapalcatl.TileCoord, _ Condition) (*StorageRespons
 	}
 }
 
+func (f *fakeStorage) HealthCheck() error {
+	return nil
+}
+
 type fakeResponseWriter struct {
 	header http.Header
 	status int

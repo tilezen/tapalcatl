@@ -46,8 +46,9 @@ func TestS3StorageEmpty(t *testing.T) {
 	keyPattern := "/{hash}/{prefix}/{layer}/{z}/{x}/{y}.{fmt}"
 	prefix := "prefix"
 	layer := "layer"
+	healthcheck := "healthcheck"
 
-	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer)
+	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
 	resp, err := storage.Fetch(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
 	if err != nil {
@@ -65,8 +66,9 @@ func TestS3Storage(t *testing.T) {
 	keyPattern := "/{prefix}/{hash}/{layer}/{z}/{x}/{y}.{fmt}"
 	prefix := "prefix"
 	layer := "layer"
+	healthcheck := "healthcheck"
 
-	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer)
+	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
 	tile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
 	key, err := storage.objectKey(tile)
