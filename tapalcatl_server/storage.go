@@ -38,21 +38,21 @@ type Storage interface {
 }
 
 type S3Storage struct {
-	client     s3iface.S3API
-	bucket     string
-	keyPattern string
-	prefix     string
-	layer      string
+	client      s3iface.S3API
+	bucket      string
+	keyPattern  string
+	prefix      string
+	layer       string
 	healthcheck string
 }
 
 func NewS3Storage(api s3iface.S3API, bucket, keyPattern, prefix, layer string, healthcheck string) *S3Storage {
 	return &S3Storage{
-		client:     api,
-		bucket:     bucket,
-		keyPattern: keyPattern,
-		prefix:     prefix,
-		layer:      layer,
+		client:      api,
+		bucket:      bucket,
+		keyPattern:  keyPattern,
+		prefix:      prefix,
+		layer:       layer,
 		healthcheck: healthcheck,
 	}
 }
@@ -130,15 +130,15 @@ func (s *S3Storage) HealthCheck() error {
 }
 
 type FileStorage struct {
-	baseDir string
-	layer   string
+	baseDir     string
+	layer       string
 	healthcheck string
 }
 
 func NewFileStorage(baseDir, layer string, healthcheck string) *FileStorage {
 	return &FileStorage{
-		baseDir: baseDir,
-		layer:   layer,
+		baseDir:     baseDir,
+		layer:       layer,
 		healthcheck: healthcheck,
 	}
 }
