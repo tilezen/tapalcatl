@@ -168,6 +168,9 @@ func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageRespons
 
 func (s *FileStorage) HealthCheck() error {
 	tilepath := filepath.Join(s.baseDir, s.healthcheck)
-	_, err := os.Open(tilepath)
+	f, err := os.Open(tilepath)
+	if err != nil {
+		err = f.Close()
+	}
 	return err
 }
