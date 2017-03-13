@@ -125,7 +125,10 @@ func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse,
 
 func (s *S3Storage) HealthCheck() error {
 	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &s.healthcheck}
-	_, err := s.client.GetObject(input)
+	resp, err := s.client.GetObject(input)
+	if err != nil {
+		resp.Body.Close()
+	}
 	return err
 }
 

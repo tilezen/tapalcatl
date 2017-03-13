@@ -501,6 +501,7 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 			}
 			return
 		}
+
 		numStorageHits.Add(1)
 		reqState.FetchState = FetchState_Success
 
@@ -512,14 +513,18 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 		}
 		numStorageReads.Add(1)
 
-		// metatile reader needs to be able to seek in the buffer and know
-		// its size. the easiest way to ensure that is to buffer the whole
-		// thing into memory.
 		storageResp := storageResult.Response
 
+		// ensure that now we have a body to read, it always gets closed
+		defer storageResp.Body.Close()
+
+		// grab a buffer used to store the response in memory
 		buf := bufferManager.Get()
 		defer bufferManager.Put(buf)
 
+		// metatile reader needs to be able to seek in the buffer and know
+		// its size. the easiest way to ensure that is to buffer the whole
+		// thing into memory.
 		storageReadStart := time.Now()
 		bodySize, err := io.Copy(buf, storageResp.Body)
 		reqState.Duration.StorageRead = time.Since(storageReadStart)
