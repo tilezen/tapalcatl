@@ -82,12 +82,21 @@ func (l *JsonLoggerImpl) Log(jsonMap map[string]interface{}, xs ...interface{}) 
 	if _, ok := jsonMap["hostname"]; !ok {
 		jsonMap["hostname"] = l.Hostname
 	}
+	// if there are args, interpolate into the "message"
+	// that key is assumed to be the string that gets interpolated
+	if len(xs) > 0 {
+		if msgValue, ok := jsonMap["message"]; ok {
+			if msgStr, ok := msgValue.(string); ok {
+				jsonMap["message"] = fmt.Sprintf(msgStr, xs...)
+			}
+		}
+	}
 	jsonBytes, err := json.Marshal(jsonMap)
 	if err != nil {
 		panic("ERROR creating json")
 	}
 	jsonStr := string(jsonBytes)
-	l.Logger.Printf(jsonStr, xs...)
+	l.Logger.Printf(jsonStr)
 }
 
 func (l *JsonLoggerImpl) Info(msg string, xs ...interface{}) {
