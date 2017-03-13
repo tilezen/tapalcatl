@@ -586,10 +586,10 @@ func HealthCheckHandler(storages []Storage, logger JsonLogger) http.Handler {
 		healthy := true
 
 		for _, storage := range storages {
-			storage_err := storage.HealthCheck()
+			storageErr := storage.HealthCheck()
 
-			if storage_err != nil {
-				logger.Error(LogCategory_StorageError, "Healthcheck on storage %s failed: %s", storage, storage_err.Error())
+			if storageErr != nil {
+				logger.Error(LogCategory_StorageError, "Healthcheck on storage %s failed: %s", storage, storageErr.Error())
 				healthy = false
 				break
 			}
