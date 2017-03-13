@@ -1,6 +1,11 @@
 CHANGELOG
 =========
 
+v1.2.1
+------
+* Improve json logging
+* Close s3 responses
+
 v1.2.0
 ------
 * Log as json
