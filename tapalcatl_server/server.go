@@ -279,6 +279,12 @@ func logFatalCfgErr(logger JsonLogger, msg string, xs ...interface{}) {
 	os.Exit(1)
 }
 
+// Used to ensure that we don't have redundant health checks
+type HealthCheckConfig struct {
+	Type        string
+	Healthcheck string
+}
+
 func main() {
 	var listen, healthcheck, debugHost string
 	var poolNumEntries, poolEntrySize int
@@ -398,7 +404,8 @@ func main() {
 	}
 
 	// keep track of the storages so we can healthcheck them
-	var storages []Storage
+	// we only need to check unique type/healthcheck configurations
+	healthCheckStorages := make(map[HealthCheckConfig]Storage)
 
 	// create the storage implementations and handler routes for patterns
 	var storage Storage
@@ -433,6 +440,8 @@ func main() {
 		if layer == "" {
 			logFatalCfgErr(logger, "Missing layer for storage: %s", storageDefinitionName)
 		}
+
+		var healthcheck string
 
 		switch sd.Type {
 		case "s3":
@@ -470,7 +479,8 @@ func main() {
 			}
 
 			s3Client := s3.New(awsSession)
-			storage = NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer, sd.Healthcheck)
+			healthcheck = sd.Healthcheck
+			storage = NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer, healthcheck)
 
 		case "file":
 			if sd.BaseDir == "" {
@@ -481,18 +491,28 @@ func main() {
 				logger.Warning(LogCategory_ConfigError, "Missing healthcheck for storage file")
 			}
 
-			storage = NewFileStorage(sd.BaseDir, layer, sd.Healthcheck)
+			healthcheck = sd.Healthcheck
+			storage = NewFileStorage(sd.BaseDir, layer, healthcheck)
 
 		default:
 			logFatalCfgErr(logger, "Unknown storage type: %s", sd.Type)
 		}
 
-		storage_err := storage.HealthCheck()
-		if storage_err != nil {
-			logger.Warning(LogCategory_ConfigError, "Healthcheck failed on storage: %s", storage_err)
-		}
+		if healthcheck != "" {
+			storageErr := storage.HealthCheck()
+			if storageErr != nil {
+				logger.Warning(LogCategory_ConfigError, "Healthcheck failed on storage: %s", storageErr)
+			}
 
-		storages = append(storages, storage)
+			hcc := HealthCheckConfig{
+				Type:        sd.Type,
+				Healthcheck: healthcheck,
+			}
+
+			if _, ok := healthCheckStorages[hcc]; !ok {
+				healthCheckStorages[hcc] = storage
+			}
+		}
 
 		parser := &MuxParser{
 			mimeMap: hc.Mime,
@@ -505,7 +525,13 @@ func main() {
 	}
 
 	if len(healthcheck) > 0 {
-		hc := HealthCheckHandler(storages, logger)
+		storagesToCheck := make([]Storage, len(healthCheckStorages))
+		i := 0
+		for _, storage := range healthCheckStorages {
+			storagesToCheck[i] = storage
+			i++
+		}
+		hc := HealthCheckHandler(storagesToCheck, logger)
 		r.Handle(healthcheck, hc).Methods("GET")
 	}
 
