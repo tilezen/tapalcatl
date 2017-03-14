@@ -1,6 +1,10 @@
 CHANGELOG
 =========
 
+v1.2.2
+------
+* Fix bug when S3 response body is nil
+
 v1.2.1
 ------
 * Improve json logging
