@@ -570,6 +570,8 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 			reqState.ResponseState = ResponseState_Error
 			return
 		}
+		// make sure to close zip file reader
+		defer reader.Close()
 		reqState.ResponseSize = int(formatSize)
 
 		rw.WriteHeader(http.StatusOK)
