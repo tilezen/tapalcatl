@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -14,10 +15,11 @@ import (
 type mockS3 struct {
 	s3iface.S3API
 	expectedKey string
+	healthcheck string
 }
 
 func (m *mockS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
-	if *i.Key == m.expectedKey {
+	if *i.Key == m.expectedKey || *i.Key == m.healthcheck {
 		length := new(int64)
 		*length = 0
 
@@ -60,13 +62,16 @@ func TestS3StorageEmpty(t *testing.T) {
 }
 
 func TestS3Storage(t *testing.T) {
-	api := &mockS3{expectedKey: "/prefix/fa9bb/layer/0/0/0.zip"}
-
 	bucket := "bucket"
 	keyPattern := "/{prefix}/{hash}/{layer}/{z}/{x}/{y}.{fmt}"
 	prefix := "prefix"
 	layer := "layer"
 	healthcheck := "healthcheck"
+
+	api := &mockS3{
+		expectedKey: "/prefix/fa9bb/layer/0/0/0.zip",
+		healthcheck: healthcheck,
+	}
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
@@ -105,5 +110,84 @@ func TestS3Storage(t *testing.T) {
 	lastModStr := lastMod.UTC().Format(http.TimeFormat)
 	if expLastModStr != lastModStr {
 		t.Fatalf("Expected Last-Modified to be %#v, but got %#v", expLastModStr, lastModStr)
+	}
+
+	// should be able to healthcheck as well
+	err = storage.HealthCheck()
+	if err != nil {
+		t.Fatalf("Unable to healthcheck Mock S3 storage, got error: %s", err.Error())
+	}
+}
+
+type nullBodyS3 struct {
+	s3iface.S3API
+}
+
+func (n *nullBodyS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
+	length := new(int64)
+	*length = 0
+
+	etag := new(string)
+	*etag = "1234"
+
+	lastMod := new(time.Time)
+	*lastMod = time.Date(2016, time.November, 17, 12, 27, 0, 0, time.UTC)
+
+	obj := &s3.GetObjectOutput{
+		Body:         nil,
+		ETag:         etag,
+		LastModified: lastMod,
+	}
+	return obj, nil
+}
+
+// looks like sometimes the S3 body returned will be null, so we should check
+// that before trying to close it.
+func TestS3StorageNullBody(t *testing.T) {
+	api := &nullBodyS3{}
+
+	bucket := "bucket"
+	keyPattern := "/{hash}/{prefix}/{layer}/{z}/{x}/{y}.{fmt}"
+	prefix := "prefix"
+	layer := "layer"
+	healthcheck := "healthcheck"
+
+	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
+
+	_, err := storage.Fetch(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
+	if err != nil {
+		t.Fatalf("Unable to Get tile from null body S3: %s", err.Error())
+	}
+
+	// should be able to healthcheck as well
+	err = storage.HealthCheck()
+	if err != nil {
+		t.Fatalf("Unable to healthcheck null body storage, got error: %s", err.Error())
+	}
+}
+
+type errorS3 struct {
+	s3iface.S3API
+}
+
+func (e *errorS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
+	return nil, errors.New("Error getting object from error S3")
+}
+
+func TestS3StorageError(t *testing.T) {
+	api := &errorS3{}
+
+	bucket := "bucket"
+	keyPattern := "/{hash}/{prefix}/{layer}/{z}/{x}/{y}.{fmt}"
+	prefix := "prefix"
+	layer := "layer"
+	healthcheck := "healthcheck"
+
+	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
+
+	// healthcheck should return error
+	err := storage.HealthCheck()
+	if err == nil {
+		t.Fatalf("Got an OK healthcheck from error storage")
 	}
 }
