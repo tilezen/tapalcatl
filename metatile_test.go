@@ -111,4 +111,16 @@ func TestMetaOffset(t *testing.T) {
 		TileCoord{Z: 12, X: 637, Y: 935, Format: "json"},
 		TileCoord{Z: 9, X: 79, Y: 116, Format: "zip"},
 		TileCoord{Z: 3, X: 5, Y: 7, Format: "json"})
+
+	// check that the "512px" 0/0/0 tile is accessible.
+	checkMetaOffset(t, 2, 2,
+		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"},
+		TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"},
+		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
+
+	// check that when the metatile would be smaller than the world (i.e: zoom < 0) then it just stops at 0 and we get the offset to the 0/0/0 tile.
+	checkMetaOffset(t, 2, 1,
+		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"},
+		TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"},
+		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
 }

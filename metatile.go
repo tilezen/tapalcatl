@@ -79,15 +79,32 @@ func (t TileCoord) MetaAndOffset(metaSize, tileSize int) (meta, offset TileCoord
 	// note that the uint->int conversion is technically a narrowing, but cannot
 	// overflow because we know it contains the difference of two Log2s, which
 	// cannot be larger than 32.
-	meta.Z = t.Z - int(deltaZ)
-	meta.X = t.X >> deltaZ
-	meta.Y = t.Y >> deltaZ
-	meta.Format = "zip"
+	iDeltaZ := int(deltaZ)
 
-	offset.Z = t.Z - meta.Z
-	offset.X = t.X - (meta.X << deltaZ)
-	offset.Y = t.Y - (meta.Y << deltaZ)
-	offset.Format = t.Format
+	// if the reduction in zoom due to the metatile size would take us "outside
+	// the world" and leave meta.Z < 0, then we just clamp to zero.
+	if t.Z < iDeltaZ {
+		meta.Z = 0
+		meta.X = 0
+		meta.Y = 0
+		meta.Format = "zip"
+
+		offset.Z = 0
+		offset.X = 0
+		offset.Y = 0
+		offset.Format = t.Format
+
+	} else {
+		meta.Z = t.Z - iDeltaZ
+		meta.X = t.X >> deltaZ
+		meta.Y = t.Y >> deltaZ
+		meta.Format = "zip"
+
+		offset.Z = t.Z - meta.Z
+		offset.X = t.X - (meta.X << deltaZ)
+		offset.Y = t.Y - (meta.Y << deltaZ)
+		offset.Format = t.Format
+	}
 
 	return
 }
