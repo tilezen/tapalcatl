@@ -3,7 +3,7 @@ CHANGELOG
 
 v1.3.0
 ------
-* Clamp to 0/0/0
+* Clamp to tile requests to 0/0/0 (don't allow negative tile coordinates)
 
 v1.2.2
 ------
