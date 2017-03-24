@@ -1,6 +1,10 @@
 CHANGELOG
 =========
 
+v1.3.0
+------
+* Clamp to 0/0/0
+
 v1.2.2
 ------
 * Fix bug when S3 response body is nil
