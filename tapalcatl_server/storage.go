@@ -24,6 +24,7 @@ type SuccessfulResponse struct {
 	Body         io.ReadCloser
 	LastModified *time.Time
 	ETag         *string
+	Size         uint64
 }
 
 type StorageResponse struct {
@@ -32,18 +33,55 @@ type StorageResponse struct {
 	NotFound    bool
 }
 
+type TileJsonFormat int
+
+const (
+	TileJsonFormat_Mvt = iota
+	TileJsonFormat_Json
+	TileJsonFormat_Topojson
+)
+
+func (f *TileJsonFormat) Name() string {
+	switch *f {
+	case TileJsonFormat_Mvt:
+		return "mapbox"
+	case TileJsonFormat_Json:
+		return "geojson"
+	case TileJsonFormat_Topojson:
+		return "topojson"
+	}
+	panic(fmt.Sprintf("Unknown tilejson format: %d", int(*f)))
+}
+
+func NewTileJsonFormat(name string) *TileJsonFormat {
+	var format TileJsonFormat
+	switch name {
+	case "mapbox":
+		format = TileJsonFormat_Mvt
+	case "geojson":
+		format = TileJsonFormat_Json
+	case "topojson":
+		format = TileJsonFormat_Topojson
+	default:
+		return nil
+	}
+	return &format
+}
+
 type Storage interface {
 	Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error)
+	TileJson(f TileJsonFormat, c Condition) (*StorageResponse, error)
 	HealthCheck() error
 }
 
 type S3Storage struct {
-	client      s3iface.S3API
-	bucket      string
-	keyPattern  string
-	prefix      string
-	layer       string
-	healthcheck string
+	client          s3iface.S3API
+	bucket          string
+	keyPattern      string
+	tilejsonPattern string
+	prefix          string
+	layer           string
+	healthcheck     string
 }
 
 func NewS3Storage(api s3iface.S3API, bucket, keyPattern, prefix, layer string, healthcheck string) *S3Storage {
@@ -77,13 +115,8 @@ func (s *S3Storage) objectKey(t tapalcatl.TileCoord) (string, error) {
 	return interpol.WithMap(s.keyPattern, m)
 }
 
-func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error) {
+func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, error) {
 	var result *StorageResponse
-
-	key, err := s.objectKey(t)
-	if err != nil {
-		return nil, err
-	}
 
 	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &key}
 	input.IfModifiedSince = c.IfModifiedSince
@@ -117,10 +150,20 @@ func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse,
 			Body:         output.Body,
 			LastModified: output.LastModified,
 			ETag:         output.ETag,
+			Size:         uint64(*output.ContentLength),
 		},
 	}
 
 	return result, nil
+}
+
+func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error) {
+	key, err := s.objectKey(t)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.respondWithKey(key, c)
 }
 
 func (s *S3Storage) HealthCheck() error {
@@ -130,6 +173,15 @@ func (s *S3Storage) HealthCheck() error {
 		resp.Body.Close()
 	}
 	return err
+}
+
+func (s *S3Storage) TileJson(f TileJsonFormat, c Condition) (*StorageResponse, error) {
+	filename := f.Name()
+	toHash := fmt.Sprintf("/tilejson/%s.json", filename)
+	hash := md5.Sum([]byte(toHash))
+	hashUrlPathSegment := fmt.Sprintf("%x", hash)[0:5]
+	key := fmt.Sprintf("%s/%s/%s", s.prefix, hashUrlPathSegment, toHash)
+	return s.respondWithKey(key, c)
 }
 
 type FileStorage struct {
@@ -146,9 +198,8 @@ func NewFileStorage(baseDir, layer string, healthcheck string) *FileStorage {
 	}
 }
 
-func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error) {
-	tilepath := filepath.Join(f.baseDir, f.layer, filepath.FromSlash(t.FileName()))
-	file, err := os.Open(tilepath)
+func respondWithPath(path string) (*StorageResponse, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			resp := &StorageResponse{
@@ -167,6 +218,19 @@ func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageRespons
 		}
 		return resp, nil
 	}
+}
+
+func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error) {
+	tilepath := filepath.Join(f.baseDir, f.layer, filepath.FromSlash(t.FileName()))
+	return respondWithPath(tilepath)
+}
+
+func (s *FileStorage) TileJson(f TileJsonFormat, c Condition) (*StorageResponse, error) {
+	dirpath := "tilejson"
+	tileJsonExt := "json"
+	filename := fmt.Sprintf("%s.%s", f.Name(), tileJsonExt)
+	tilejsonPath := filepath.Join(s.baseDir, dirpath, filename)
+	return respondWithPath(tilejsonPath)
 }
 
 func (s *FileStorage) HealthCheck() error {

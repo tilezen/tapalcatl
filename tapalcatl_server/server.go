@@ -75,10 +75,15 @@ type storageConfig struct {
 	BaseDir *string
 }
 
+type routeHandlerConfig struct {
+	storageConfig
+	Type *string
+}
+
 type handlerConfig struct {
 	Aws     *awsConfig
 	Storage map[string]storageDefinition
-	Pattern map[string]storageConfig
+	Pattern map[string]routeHandlerConfig
 	Mime    map[string]string
 }
 
@@ -120,7 +125,7 @@ func parseHTTPDates(date string) (*time.Time, error) {
 
 // MuxParser parses the tile coordinate from the captured arguments from
 // the gorilla mux router.
-type MuxParser struct {
+type MetatileMuxParser struct {
 	mimeMap map[string]string
 }
 
@@ -183,40 +188,101 @@ func (pe *ParseError) Error() string {
 	}
 }
 
-// Parse ignores its argument and uses values from the capture.
-func (mp *MuxParser) Parse(req *http.Request) (*ParseResult, error) {
-	m := mux.Vars(req)
-
-	var t tapalcatl.TileCoord
-	var contentType string
+func ParseCondition(req *http.Request) (Condition, *CondParseError) {
+	result := Condition{}
 	var err error
-	var ok bool
+	ifNoneMatch := req.Header.Get("If-None-Match")
+	if ifNoneMatch != "" {
+		result.IfNoneMatch = &ifNoneMatch
+	}
 
+	ifModifiedSince := req.Header.Get("If-Modified-Since")
+	if ifModifiedSince != "" {
+		result.IfModifiedSince, err = parseHTTPDates(ifModifiedSince)
+		if err != nil {
+			return result, &CondParseError{IfModifiedSinceError: err}
+		}
+	}
+
+	return result, nil
+}
+
+type TileJsonParseError struct {
+	InvalidFormat *string
+}
+
+func (te *TileJsonParseError) Error() string {
+	if te.InvalidFormat != nil {
+		return fmt.Sprintf("Invalid Format: %s", *te.InvalidFormat)
+	}
+	return ""
+}
+
+type TileJsonParser struct{}
+
+func (tp *TileJsonParser) Parse(req *http.Request) (*ParseResult, error) {
+	parseResult := &ParseResult{
+		Type:        ParseResultType_Tilejson,
+		ContentType: "application/json",
+		HttpData:    ParseHttpData(req),
+	}
+	m := mux.Vars(req)
+	formatName := m["fmt"]
+	tileJsonFormat := NewTileJsonFormat(formatName)
+	if tileJsonFormat == nil {
+		return parseResult, &TileJsonParseError{
+			InvalidFormat: &formatName,
+		}
+	}
+	tileJsonData := &TileJsonParseData{Format: *tileJsonFormat}
+	parseResult.AdditionalData = tileJsonData
+	var condErr *CondParseError
+	parseResult.Cond, condErr = ParseCondition(req)
+	if condErr != nil {
+		return parseResult, condErr
+	}
+	return parseResult, nil
+}
+
+func ParseHttpData(req *http.Request) HttpRequestData {
 	var apiKey string
 	q := req.URL.Query()
 	if apiKeys, ok := q["api_key"]; ok && len(apiKeys) > 0 {
 		apiKey = apiKeys[0]
 	}
+	return HttpRequestData{
+		Path:      req.URL.Path,
+		ApiKey:    apiKey,
+		UserAgent: req.UserAgent(),
+		Referrer:  req.Referer(),
+	}
+}
+
+func (mp *MetatileMuxParser) Parse(req *http.Request) (*ParseResult, error) {
+	m := mux.Vars(req)
+
+	var contentType string
+	var err error
+	var ok bool
 
 	parseResult := &ParseResult{
-		HttpData: HttpRequestData{
-			Path:      req.URL.Path,
-			ApiKey:    apiKey,
-			UserAgent: req.UserAgent(),
-			Referrer:  req.Referer(),
-		},
+		Type:     ParseResultType_Metatile,
+		HttpData: ParseHttpData(req),
 	}
+	metatileData := &MetatileParseData{}
+	parseResult.AdditionalData = metatileData
 
-	t.Format = m["fmt"]
-	if contentType, ok = mp.mimeMap[t.Format]; !ok {
+	fmt := m["fmt"]
+	if contentType, ok = mp.mimeMap[fmt]; !ok {
 		return parseResult, &ParseError{
 			MimeError: &MimeParseError{
-				BadFormat: t.Format,
+				BadFormat: fmt,
 			},
 		}
 	}
 	parseResult.ContentType = contentType
-	parseResult.HttpData.Format = t.Format
+	t := &metatileData.Coord
+	t.Format = fmt
 
 	var coordError CoordParseError
 	z := m["z"]
@@ -242,24 +308,10 @@ func (mp *MuxParser) Parse(req *http.Request) (*ParseResult, error) {
 			CoordError: &coordError,
 		}
 	}
-
-	parseResult.Coord = t
-
-	ifNoneMatch := req.Header.Get("If-None-Match")
-	if ifNoneMatch != "" {
-		parseResult.Cond.IfNoneMatch = &ifNoneMatch
-	}
-
-	ifModifiedSince := req.Header.Get("If-Modified-Since")
-	if ifModifiedSince != "" {
-		parseResult.Cond.IfModifiedSince, err = parseHTTPDates(ifModifiedSince)
-		if err != nil {
-			return parseResult, &ParseError{
-				CondError: &CondParseError{
-					IfModifiedSinceError: err,
-				},
-			}
-		}
+	var condErr *CondParseError
+	parseResult.Cond, condErr = ParseCondition(req)
+	if condErr != nil {
+		return parseResult, &ParseError{CondError: condErr}
 	}
 
 	return parseResult, nil
@@ -409,16 +461,16 @@ func main() {
 
 	// create the storage implementations and handler routes for patterns
 	var storage Storage
-	for reqPattern, sc := range hc.Pattern {
+	for reqPattern, rhc := range hc.Pattern {
 
-		storageDefinitionName := sc.Storage
+		storageDefinitionName := rhc.Storage
 		sd, ok := hc.Storage[storageDefinitionName]
 		if !ok {
 			logFatalCfgErr(logger, "Unknown storage definition: %s", storageDefinitionName)
 		}
 		metatileSize := sd.MetatileSize
-		if sc.MetatileSize != nil {
-			metatileSize = *sc.MetatileSize
+		if rhc.MetatileSize != nil {
+			metatileSize = *rhc.MetatileSize
 		}
 		if !tapalcatl.IsPowerOfTwo(metatileSize) {
 			logFatalCfgErr(logger, "Metatile size must be power of two, but %d is not", metatileSize)
@@ -427,15 +479,15 @@ func main() {
 		if sd.TileSize != nil {
 			tileSize = *sd.TileSize
 		}
-		if sc.TileSize != nil {
-			tileSize = *sc.TileSize
+		if rhc.TileSize != nil {
+			tileSize = *rhc.TileSize
 		}
 		if !tapalcatl.IsPowerOfTwo(tileSize) {
 			logFatalCfgErr(logger, "Tile size must be power of two, but %d is not", tileSize)
 		}
 		layer := sd.Layer
-		if sc.Layer != nil {
-			layer = *sc.Layer
+		if rhc.Layer != nil {
+			layer = *rhc.Layer
 		}
 		if layer == "" {
 			logFatalCfgErr(logger, "Missing layer for storage: %s", storageDefinitionName)
@@ -445,10 +497,10 @@ func main() {
 
 		switch sd.Type {
 		case "s3":
-			if sc.Prefix == nil {
+			if rhc.Prefix == nil {
 				logFatalCfgErr(logger, "S3 configuration requires prefix")
 			}
-			prefix := *sc.Prefix
+			prefix := *rhc.Prefix
 
 			if awsSession == nil {
 				if hc.Aws != nil && hc.Aws.Region != nil {
@@ -463,8 +515,8 @@ func main() {
 				logFatalCfgErr(logger, "Unable to set up AWS session: %s", err.Error())
 			}
 			keyPattern := sd.KeyPattern
-			if sc.KeyPattern != nil {
-				keyPattern = *sc.KeyPattern
+			if rhc.KeyPattern != nil {
+				keyPattern = *rhc.KeyPattern
 			}
 
 			if sd.Bucket == "" {
@@ -514,14 +566,25 @@ func main() {
 			}
 		}
 
-		parser := &MuxParser{
-			mimeMap: hc.Mime,
+		if rhc.Type == nil || *rhc.Type == "metatile" {
+			parser := &MetatileMuxParser{
+				mimeMap: hc.Mime,
+			}
+
+			h := MetatileHandler(parser, metatileSize, tileSize, hc.Mime, storage, bufferManager, mw, logger)
+			gzipped := gziphandler.GzipHandler(h)
+
+			r.Handle(reqPattern, gzipped).Methods("GET")
+
+		} else if rhc.Type != nil && *rhc.Type == "tilejson" {
+			parser := &TileJsonParser{}
+			h := TileJsonHandler(parser, storage, mw, logger)
+			gzipped := gziphandler.GzipHandler(h)
+			r.Handle(reqPattern, gzipped).Methods("GET")
+		} else {
+			systemLogger.Fatalf("ERROR: Invalid route handler type: %s\n", *rhc.Type)
 		}
 
-		h := MetatileHandler(parser, metatileSize, tileSize, hc.Mime, storage, bufferManager, mw, logger)
-		gzipped := gziphandler.GzipHandler(h)
-
-		r.Handle(reqPattern, gzipped).Methods("GET")
 	}
 
 	if len(healthcheck) > 0 {

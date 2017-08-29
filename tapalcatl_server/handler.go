@@ -16,14 +16,31 @@ type HttpRequestData struct {
 	ApiKey    string
 	UserAgent string
 	Referrer  string
-	Format    string
 }
 
+type ParseResultType int
+
+const (
+	ParseResultType_Nil ParseResultType = iota
+	ParseResultType_Metatile
+	ParseResultType_Tilejson
+)
+
 type ParseResult struct {
-	Coord       tapalcatl.TileCoord
+	Type        ParseResultType
 	Cond        Condition
 	ContentType string
 	HttpData    HttpRequestData
+	// set to be more specific data based on parse type
+	AdditionalData interface{}
+}
+
+type MetatileParseData struct {
+	Coord tapalcatl.TileCoord
+}
+
+type TileJsonParseData struct {
+	Format TileJsonFormat
 }
 
 type Parser interface {
@@ -156,6 +173,7 @@ type RequestState struct {
 	Duration             ReqDuration
 	Coord                *tapalcatl.TileCoord
 	HttpData             HttpRequestData
+	Format               string
 	ResponseSize         int
 }
 
@@ -211,14 +229,6 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 		"total":         convertDurationToMillis(reqState.Duration.Total),
 	}
 
-	if reqState.Coord != nil {
-		result["coord"] = map[string]int{
-			"x": reqState.Coord.X,
-			"y": reqState.Coord.Y,
-			"z": reqState.Coord.Z,
-		}
-	}
-
 	httpJsonData := make(map[string]interface{})
 	httpJsonData["path"] = reqState.HttpData.Path
 	if userAgent := reqState.HttpData.UserAgent; userAgent != "" {
@@ -230,9 +240,18 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	if apiKey := reqState.HttpData.ApiKey; apiKey != "" {
 		httpJsonData["api_key"] = apiKey
 	}
-	if format := reqState.HttpData.Format; format != "" {
+	if format := reqState.Format; format != "" {
 		httpJsonData["format"] = format
 	}
+	if reqState.Coord != nil {
+		result["coord"] = map[string]int{
+			"x": reqState.Coord.X,
+			"y": reqState.Coord.Y,
+			"z": reqState.Coord.Z,
+		}
+		httpJsonData["format"] = reqState.Coord.Format
+	}
+
 	if responseSize := reqState.ResponseSize; responseSize > 0 {
 		httpJsonData["response_size"] = responseSize
 	}
@@ -366,7 +385,7 @@ func (smw *statsdMetricsWriter) Process(reqState *RequestState) {
 	psw.WriteTimer("timers.response-write", reqState.Duration.RespWrite)
 	psw.WriteTimer("timers.total", reqState.Duration.Total)
 
-	if format := reqState.HttpData.Format; format != "" {
+	if format := reqState.Format; format != "" {
 		psw.WriteCount(fmt.Sprintf("formats.%s", format), 1)
 	}
 	if responseSize := reqState.ResponseSize; responseSize > 0 {
@@ -402,6 +421,181 @@ func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger Json
 	return smw
 }
 
+type TileJsonDuration struct {
+	Total, Parse, StorageFetch, StorageReadRespWrite time.Duration
+}
+
+type TileJsonRequestState struct {
+	Duration             TileJsonDuration
+	Format               *TileJsonFormat
+	ResponseState        ReqResponseState
+	FetchState           ReqFetchState
+	FetchSize            uint64
+	StorageMetadata      ReqStorageMetadata
+	IsCondError          bool
+	IsResponseWriteError bool
+	HttpData             HttpRequestData
+}
+
+func (tileJsonReqState *TileJsonRequestState) AsJsonMap() map[string]interface{} {
+	result := make(map[string]interface{})
+
+	if tileJsonReqState.FetchState > FetchState_Nil {
+		fetchResult := make(map[string]interface{})
+
+		fetchResult["state"] = tileJsonReqState.FetchState.String()
+		if tileJsonReqState.FetchSize > 0 {
+			fetchResult["size"] = tileJsonReqState.FetchSize
+		}
+		fetchResult["metadata"] = map[string]bool{
+			"has_last_modified": tileJsonReqState.StorageMetadata.HasLastModified,
+			"has_etag":          tileJsonReqState.StorageMetadata.HasEtag,
+		}
+
+		result["fetch"] = fetchResult
+	}
+
+	tileJsonReqErrs := make(map[string]bool)
+	if tileJsonReqState.IsResponseWriteError {
+		tileJsonReqErrs["response_write"] = true
+	}
+	if tileJsonReqState.IsCondError {
+		tileJsonReqErrs["cond"] = true
+	}
+	if len(tileJsonReqErrs) > 0 {
+		result["error"] = tileJsonReqErrs
+	}
+
+	result["timing"] = map[string]int64{
+		"parse":                   convertDurationToMillis(tileJsonReqState.Duration.Parse),
+		"storage_fetch":           convertDurationToMillis(tileJsonReqState.Duration.StorageFetch),
+		"storage_read_resp_write": convertDurationToMillis(tileJsonReqState.Duration.StorageReadRespWrite),
+		"total":                   convertDurationToMillis(tileJsonReqState.Duration.Total),
+	}
+
+	httpJsonData := make(map[string]interface{})
+	httpJsonData["path"] = tileJsonReqState.HttpData.Path
+	if userAgent := tileJsonReqState.HttpData.UserAgent; userAgent != "" {
+		httpJsonData["user_agent"] = userAgent
+	}
+	if referrer := tileJsonReqState.HttpData.Referrer; referrer != "" {
+		httpJsonData["referer"] = referrer
+	}
+	if apiKey := tileJsonReqState.HttpData.ApiKey; apiKey != "" {
+		httpJsonData["api_key"] = apiKey
+	}
+	if format := tileJsonReqState.Format; format != nil {
+		httpJsonData["format"] = format.Name()
+	}
+	result["http"] = httpJsonData
+
+	return result
+}
+
+func TileJsonHandler(p Parser, storage Storage, mw metricsWriter, logger JsonLogger) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		tileJsonReqState := TileJsonRequestState{}
+		numRequests.Add(1)
+
+		startTime := time.Now()
+
+		defer func() {
+			totalDuration := time.Since(startTime)
+			tileJsonReqState.Duration.Total = totalDuration
+
+			tileJsonReqState := tileJsonReqState.AsJsonMap()
+			logger.TileJson(tileJsonReqState)
+
+			// TODO think about whether we want to write metrics out?
+			// mw.Write(&jsonReqState)
+		}()
+
+		parseStart := time.Now()
+		parseResult, err := p.Parse(req)
+		tileJsonReqState.Duration.Parse = time.Since(parseStart)
+		if parseResult != nil {
+			// set the http data here so that on 404s we log the path too
+			tileJsonReqState.HttpData = parseResult.HttpData
+		}
+		if err != nil {
+			switch err := err.(type) {
+			case *TileJsonParseError:
+				tileJsonReqState.ResponseState = ResponseState_NotFound
+				// format not found
+				http.Error(rw, "Not Found", http.StatusNotFound)
+				logger.Warning(LogCategory_ParseError, "foo bar!")
+				return
+			case *CondParseError:
+				logger.Warning(LogCategory_ConditionError, err.Error())
+				tileJsonReqState.IsCondError = true
+				// we can continue down this path, just not use the condition in the storage fetch
+			default:
+				logger.Warning(LogCategory_ParseError, fmt.Sprintf("Unknown parse error: %#v", err))
+			}
+		}
+		tileJsonReqState.HttpData = parseResult.HttpData
+		tileJsonData := parseResult.AdditionalData.(*TileJsonParseData)
+		tileJsonReqState.Format = &tileJsonData.Format
+
+		storageFetchStart := time.Now()
+		storageResult, err := storage.TileJson(tileJsonData.Format, parseResult.Cond)
+		tileJsonReqState.Duration.StorageFetch = time.Since(storageFetchStart)
+		if err != nil {
+			http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
+			logger.Warning(LogCategory_StorageError, "Metatile storage fetch failure: %#v", err)
+			tileJsonReqState.ResponseState = ResponseState_Error
+			tileJsonReqState.FetchState = FetchState_FetchError
+			storageFetchErrors.Add(1)
+			return
+		}
+		if storageResult.NotFound {
+			numStorageMisses.Add(1)
+			http.NotFound(rw, req)
+			tileJsonReqState.ResponseState = ResponseState_NotFound
+			tileJsonReqState.FetchState = FetchState_NotFound
+			return
+		}
+		numStorageHits.Add(1)
+		tileJsonReqState.FetchState = FetchState_Success
+
+		if storageResult.NotModified {
+			numStorageNotModified.Add(1)
+			rw.WriteHeader(http.StatusNotModified)
+			tileJsonReqState.ResponseState = ResponseState_NotModified
+			return
+		}
+		numStorageReads.Add(1)
+		storageResp := storageResult.Response
+
+		defer storageResp.Body.Close()
+
+		headers := rw.Header()
+		headers.Set("Content-Type", parseResult.ContentType)
+		headers.Set("Content-Length", fmt.Sprintf("%d", storageResp.Size))
+		tileJsonReqState.FetchSize = storageResp.Size
+		if lastMod := storageResp.LastModified; lastMod != nil {
+			lastModifiedFormatted := lastMod.UTC().Format(http.TimeFormat)
+			headers.Set("Last-Modified", lastModifiedFormatted)
+			tileJsonReqState.StorageMetadata.HasLastModified = true
+		}
+		if etag := storageResp.ETag; etag != nil {
+			headers.Set("ETag", *etag)
+			tileJsonReqState.StorageMetadata.HasEtag = true
+		}
+
+		rw.WriteHeader(http.StatusOK)
+		tileJsonReqState.ResponseState = ResponseState_Success
+		storageReadRespWriteStart := time.Now()
+		_, err = io.Copy(rw, storageResp.Body)
+		tileJsonReqState.Duration.StorageReadRespWrite = time.Since(storageReadRespWriteStart)
+		if err != nil {
+			responseWriteErrors.Add(1)
+			logger.Error(LogCategory_ResponseError, "Failed to write response body: %#v", err)
+			tileJsonReqState.IsResponseWriteError = true
+		}
+	})
+}
+
 func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]string, storage Storage, bufferManager BufferManager, mw metricsWriter, logger JsonLogger) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
@@ -434,6 +628,7 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 		parseStart := time.Now()
 		parseResult, err := p.Parse(req)
 		reqState.Duration.Parse = time.Since(parseStart)
+		metatileData := parseResult.AdditionalData.(*MetatileParseData)
 		if err != nil {
 			requestParseErrors.Add(1)
 			var sc int
@@ -469,10 +664,11 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 			}
 		}
 
-		reqState.Coord = &parseResult.Coord
+		reqState.Coord = &metatileData.Coord
+		reqState.Format = reqState.Coord.Format
 		reqState.HttpData = parseResult.HttpData
 
-		metaCoord, offset, err := parseResult.Coord.MetaAndOffset(metatileSize, tileSize)
+		metaCoord, offset, err := metatileData.Coord.MetaAndOffset(metatileSize, tileSize)
 		if err != nil {
 			configErrors.Add(1)
 			logger.Warning(LogCategory_ConfigError, "MetaAndOffset could not be calculated: %s", err.Error())
@@ -490,7 +686,7 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 			if err != nil {
 				storageFetchErrors.Add(1)
 				logger.Warning(LogCategory_StorageError, "Metatile storage fetch failure: %#v", err)
-				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
 				reqState.FetchState = FetchState_FetchError
 				reqState.ResponseState = ResponseState_Error
 			} else {
@@ -573,6 +769,7 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 		// make sure to close zip file reader
 		defer reader.Close()
 		reqState.ResponseSize = int(formatSize)
+		headers.Set("Content-Length", fmt.Sprintf("%d", formatSize))
 
 		rw.WriteHeader(http.StatusOK)
 		reqState.ResponseState = ResponseState_Success

@@ -28,6 +28,7 @@ const (
 	LogCategory_ConfigError
 	LogCategory_Metrics
 	LogCategory_ExpVars
+	LogCategory_TileJson
 )
 
 func (lc LogCategory) String() string {
@@ -52,6 +53,8 @@ func (lc LogCategory) String() string {
 		return "metrics"
 	case LogCategory_ExpVars:
 		return "expvars"
+	case LogCategory_TileJson:
+		return "tilejson"
 	}
 	panic(fmt.Sprintf("Unknown json category: %d\n", int32(lc)))
 }
@@ -64,6 +67,8 @@ type JsonLogger interface {
 
 	// for logging metrics specifically
 	Metrics(map[string]interface{})
+	// for logging tilejson metrics
+	TileJson(map[string]interface{})
 
 	// for logging expvars specifically
 	ExpVars()
@@ -125,6 +130,12 @@ func (l *JsonLoggerImpl) Error(category LogCategory, msg string, xs ...interface
 func (l *JsonLoggerImpl) Metrics(metricsData map[string]interface{}) {
 	metricsData["type"] = "info"
 	metricsData["category"] = LogCategory_Metrics.String()
+	l.Log(metricsData)
+}
+
+func (l *JsonLoggerImpl) TileJson(metricsData map[string]interface{}) {
+	metricsData["type"] = "info"
+	metricsData["category"] = LogCategory_TileJson.String()
 	l.Log(metricsData)
 }
 
