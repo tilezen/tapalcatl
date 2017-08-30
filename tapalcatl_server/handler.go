@@ -262,18 +262,20 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 }
 
 type metricsWriter interface {
-	Write(*RequestState)
+	WriteMetatileState(*RequestState)
+	WriteTileJsonState(*TileJsonRequestState)
 }
 
 type nilMetricsWriter struct{}
 
-func (_ *nilMetricsWriter) Write(reqState *RequestState) {}
+func (_ *nilMetricsWriter) WriteMetatileState(reqState *RequestState)             {}
+func (_ *nilMetricsWriter) WriteTileJsonState(jsonReqState *TileJsonRequestState) {}
 
 type statsdMetricsWriter struct {
 	addr   *net.UDPAddr
 	prefix string
 	logger JsonLogger
-	queue  chan *RequestState
+	queue  chan RequestStateContainer
 }
 
 func makeMetricPrefix(prefix string, metric string) string {
@@ -332,7 +334,7 @@ func (psw *prefixedStatsdWriter) WriteTimer(metric string, value time.Duration) 
 	writeStatsdTimer(psw.w, psw.prefix, metric, value)
 }
 
-func (smw *statsdMetricsWriter) Process(reqState *RequestState) {
+func (smw *statsdMetricsWriter) Process(reqStateContainer RequestStateContainer) {
 	conn, err := net.DialUDP("udp", nil, smw.addr)
 	if err != nil {
 		smw.logger.Error(LogCategory_Metrics, "Metrics Writer failed to connect to %s: %s\n", smw.addr, err)
@@ -350,60 +352,128 @@ func (smw *statsdMetricsWriter) Process(reqState *RequestState) {
 
 	psw.WriteCount("count", 1)
 
-	if reqState.ResponseState > ResponseState_Nil && reqState.ResponseState < ResponseState_Count {
-		respStateName := reqState.ResponseState.String()
-		respMetricName := fmt.Sprintf("responsestate.%s", respStateName)
-		psw.WriteCount(respMetricName, 1)
+	// variables to handle writing of common elements
+	var respState *ReqResponseState
+	var fetchState *ReqFetchState
+	var storageMetadata *ReqStorageMetadata
+	var isResponseWriteError *bool
+	var isCondError *bool
+
+	if reqStateContainer.metaReqState != nil {
+		reqState := reqStateContainer.metaReqState
+
+		psw.WriteCount("metatile", 1)
+
+		respState = &reqState.ResponseState
+		fetchState = &reqState.FetchState
+
+		if reqState.FetchSize.BodySize > 0 {
+			psw.WriteGauge("fetchsize.body-size", int(reqState.FetchSize.BodySize))
+			psw.WriteGauge("fetchsize.buffer-length", int(reqState.FetchSize.BytesLength))
+			psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.FetchSize.BytesCap))
+		}
+
+		storageMetadata = &reqState.StorageMetadata
+		isResponseWriteError = &reqState.IsResponseWriteError
+		isCondError = &reqState.IsCondError
+
+		psw.WriteTimer("timers.parse", reqState.Duration.Parse)
+		psw.WriteTimer("timers.storage-fetch", reqState.Duration.StorageFetch)
+		psw.WriteTimer("timers.storage-read", reqState.Duration.StorageRead)
+		psw.WriteTimer("timers.metatile-find", reqState.Duration.MetatileFind)
+		psw.WriteTimer("timers.response-write", reqState.Duration.RespWrite)
+		psw.WriteTimer("timers.total", reqState.Duration.Total)
+
+		if format := reqState.Format; format != "" {
+			psw.WriteCount(fmt.Sprintf("formats.%s", format), 1)
+		}
+		if responseSize := reqState.ResponseSize; responseSize > 0 {
+			psw.WriteGauge("response-size", responseSize)
+		}
+	} else if reqStateContainer.tileJsonReqState != nil {
+		tileJsonReqState := reqStateContainer.tileJsonReqState
+
+		psw.WriteCount("tilejson", 1)
+
+		respState = &tileJsonReqState.ResponseState
+		fetchState = &tileJsonReqState.FetchState
+		isResponseWriteError = &tileJsonReqState.IsResponseWriteError
+		isCondError = &tileJsonReqState.IsCondError
+
+		psw.WriteTimer("timers.parse", tileJsonReqState.Duration.Parse)
+		psw.WriteTimer("timers.storage-fetch", tileJsonReqState.Duration.StorageFetch)
+		// count the response writing and storage reading together as storage read
+		psw.WriteTimer("timers.storage-read", tileJsonReqState.Duration.StorageReadRespWrite)
+
+		if tileJsonReqState.Format != nil {
+			formatMetricName := fmt.Sprintf("tilejson.formats.%s", tileJsonReqState.Format.Name())
+			psw.WriteCount(formatMetricName, 1)
+		}
+
+		psw.WriteGauge("fetchsize.body-size", int(tileJsonReqState.FetchSize))
+		psw.WriteGauge("response-size", int(tileJsonReqState.FetchSize))
+
 	} else {
-		smw.logger.Error(LogCategory_InvalidCodeState, "Invalid response state: %d", int32(reqState.ResponseState))
+		smw.logger.Warning(LogCategory_InvalidCodeState, "Metric processing: no state")
 	}
 
-	if reqState.FetchState > FetchState_Nil && reqState.FetchState < FetchState_Count {
-		fetchStateName := reqState.FetchState.String()
-		fetchMetricName := fmt.Sprintf("fetchstate.%s", fetchStateName)
-		psw.WriteCount(fetchMetricName, 1)
-	} else if reqState.FetchState != FetchState_Nil {
-		smw.logger.Error(LogCategory_InvalidCodeState, "Invalid fetch state: %d", int32(reqState.FetchState))
+	if respState != nil {
+		if *respState > ResponseState_Nil && *respState < ResponseState_Count {
+			respStateName := respState.String()
+			respMetricName := fmt.Sprintf("responsestate.%s", respStateName)
+			psw.WriteCount(respMetricName, 1)
+		} else {
+			smw.logger.Error(LogCategory_InvalidCodeState, "Invalid response state: %d", int32(*respState))
+		}
+	}
+	if fetchState != nil {
+		if *fetchState > FetchState_Nil && *fetchState < FetchState_Count {
+			fetchStateName := fetchState.String()
+			fetchMetricName := fmt.Sprintf("fetchstate.%s", fetchStateName)
+			psw.WriteCount(fetchMetricName, 1)
+		} else if *fetchState != FetchState_Nil {
+			smw.logger.Error(LogCategory_InvalidCodeState, "Invalid fetch state: %d", int32(*fetchState))
+		}
+	}
+	if storageMetadata != nil {
+		psw.WriteBool("counts.lastmodified", storageMetadata.HasLastModified)
+		psw.WriteBool("counts.etag", storageMetadata.HasEtag)
 	}
 
-	if reqState.FetchSize.BodySize > 0 {
-		psw.WriteGauge("fetchsize.body-size", int(reqState.FetchSize.BodySize))
-		psw.WriteGauge("fetchsize.buffer-length", int(reqState.FetchSize.BytesLength))
-		psw.WriteGauge("fetchsize.buffer-capacity", int(reqState.FetchSize.BytesCap))
+	if isResponseWriteError != nil {
+		psw.WriteBool("errors.response-write-error", *isResponseWriteError)
+	}
+	if isCondError != nil {
+		psw.WriteBool("errors.condition-parse-error", *isCondError)
 	}
 
-	psw.WriteBool("counts.lastmodified", reqState.StorageMetadata.HasLastModified)
-	psw.WriteBool("counts.etag", reqState.StorageMetadata.HasEtag)
-
-	psw.WriteBool("errors.response-write-error", reqState.IsResponseWriteError)
-	psw.WriteBool("errors.condition-parse-error", reqState.IsCondError)
-
-	psw.WriteTimer("timers.parse", reqState.Duration.Parse)
-	psw.WriteTimer("timers.storage-fetch", reqState.Duration.StorageFetch)
-	psw.WriteTimer("timers.storage-read", reqState.Duration.StorageRead)
-	psw.WriteTimer("timers.metatile-find", reqState.Duration.MetatileFind)
-	psw.WriteTimer("timers.response-write", reqState.Duration.RespWrite)
-	psw.WriteTimer("timers.total", reqState.Duration.Total)
-
-	if format := reqState.Format; format != "" {
-		psw.WriteCount(fmt.Sprintf("formats.%s", format), 1)
-	}
-	if responseSize := reqState.ResponseSize; responseSize > 0 {
-		psw.WriteGauge("response-size", responseSize)
-	}
 }
 
-func (smw *statsdMetricsWriter) Write(reqState *RequestState) {
+type RequestStateContainer struct {
+	// one of these will be set
+	metaReqState     *RequestState
+	tileJsonReqState *TileJsonRequestState
+}
+
+func (smw *statsdMetricsWriter) enqueue(container RequestStateContainer) {
 	select {
-	case smw.queue <- reqState:
+	case smw.queue <- container:
 	default:
 		smw.logger.Warning(LogCategory_Metrics, "Metrics Writer queue full\n")
 	}
 }
 
+func (smw *statsdMetricsWriter) WriteMetatileState(reqState *RequestState) {
+	smw.enqueue(RequestStateContainer{metaReqState: reqState})
+}
+
+func (smw *statsdMetricsWriter) WriteTileJsonState(tileJsonReqState *TileJsonRequestState) {
+	smw.enqueue(RequestStateContainer{tileJsonReqState: tileJsonReqState})
+}
+
 func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger JsonLogger) metricsWriter {
 	maxQueueSize := 4096
-	queue := make(chan *RequestState, maxQueueSize)
+	queue := make(chan RequestStateContainer, maxQueueSize)
 
 	smw := &statsdMetricsWriter{
 		addr:   addr,
@@ -413,8 +483,8 @@ func NewStatsdMetricsWriter(addr *net.UDPAddr, metricsPrefix string, logger Json
 	}
 
 	go func(smw *statsdMetricsWriter) {
-		for reqState := range smw.queue {
-			smw.Process(reqState)
+		for reqStateContainer := range smw.queue {
+			smw.Process(reqStateContainer)
 		}
 	}(smw)
 
@@ -503,11 +573,9 @@ func TileJsonHandler(p Parser, storage Storage, mw metricsWriter, logger JsonLog
 			totalDuration := time.Since(startTime)
 			tileJsonReqState.Duration.Total = totalDuration
 
-			tileJsonReqState := tileJsonReqState.AsJsonMap()
-			logger.TileJson(tileJsonReqState)
+			logger.TileJson(tileJsonReqState.AsJsonMap())
 
-			// TODO think about whether we want to write metrics out?
-			// mw.Write(&jsonReqState)
+			mw.WriteTileJsonState(&tileJsonReqState)
 		}()
 
 		parseStart := time.Now()
@@ -621,7 +689,7 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 			logger.Metrics(jsonReqData)
 
 			// write out metrics
-			mw.Write(&reqState)
+			mw.WriteMetatileState(&reqState)
 
 		}()
 
