@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/tilezen/tapalcatl"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"testing"
 	"time"
@@ -35,8 +35,8 @@ type fakeParser struct {
 
 func (f *fakeParser) Parse(_ *http.Request) (*ParseResult, error) {
 	result := &ParseResult{
-		Coord:       f.tile,
-		ContentType: "application/json",
+		AdditionalData: &MetatileParseData{Coord: f.tile},
+		ContentType:    "application/json",
 	}
 	return result, nil
 }
@@ -56,6 +56,10 @@ func (f *fakeStorage) Fetch(t tapalcatl.TileCoord, _ Condition) (*StorageRespons
 
 func (f *fakeStorage) HealthCheck() error {
 	return nil
+}
+
+func (f *fakeStorage) TileJson(fmt TileJsonFormat, c Condition) (*StorageResponse, error) {
+	return nil, nil
 }
 
 type fakeResponseWriter struct {
@@ -82,6 +86,7 @@ func (_ *NilJsonLogger) Info(_ string, _ ...interface{})                   {}
 func (_ *NilJsonLogger) Warning(_ LogCategory, _ string, _ ...interface{}) {}
 func (_ *NilJsonLogger) Error(_ LogCategory, _ string, _ ...interface{})   {}
 func (_ *NilJsonLogger) Metrics(_ map[string]interface{})                  {}
+func (_ *NilJsonLogger) TileJson(_ map[string]interface{})                 {}
 func (_ *NilJsonLogger) ExpVars()                                          {}
 
 func TestHandlerMiss(t *testing.T) {
@@ -100,28 +105,6 @@ func TestHandlerMiss(t *testing.T) {
 	if rw.status != 404 {
 		t.Fatalf("Expected 404 response, but got %d", rw.status)
 	}
-}
-
-type emptyReadCloser struct{}
-
-func (_ *emptyReadCloser) Read(_ []byte) (int, error) {
-	return 0, io.EOF
-}
-
-func (_ *emptyReadCloser) Close() error {
-	return nil
-}
-
-type bufferReadCloser struct {
-	reader *bytes.Reader
-}
-
-func (b *bufferReadCloser) Read(p []byte) (int, error) {
-	return b.reader.Read(p)
-}
-
-func (b *bufferReadCloser) Close() error {
-	return nil
 }
 
 func TestHandlerHit(t *testing.T) {
@@ -146,7 +129,7 @@ func TestHandlerHit(t *testing.T) {
 	}
 	storage.storage[metatile] = &StorageResponse{
 		Response: &SuccessfulResponse{
-			Body:         &bufferReadCloser{reader: bytes.NewReader(zipfile.Bytes())},
+			Body:         ioutil.NopCloser(bytes.NewReader(zipfile.Bytes())),
 			LastModified: &lastModified,
 			ETag:         &etag,
 		},
