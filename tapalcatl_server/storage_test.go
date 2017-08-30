@@ -156,10 +156,12 @@ func TestS3StorageNullBody(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
-	_, err := storage.Fetch(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
+	resp, err := storage.Fetch(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
 	if err != nil {
 		t.Fatalf("Unable to Get tile from null body S3: %s", err.Error())
 	}
+	// ensure that we can close the body safely in this case too
+	resp.Response.Body.Close()
 
 	// should be able to healthcheck as well
 	err = storage.HealthCheck()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -9,6 +10,7 @@ import (
 	"github.com/imkira/go-interpol"
 	"github.com/tilezen/tapalcatl"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -145,12 +147,24 @@ func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, e
 		}
 	}
 
+	// ensure that it's safe to always close the body upstream
+	var storageSize uint64
+	var body io.ReadCloser
+	if output.Body == nil {
+		body = ioutil.NopCloser(&bytes.Buffer{})
+	} else {
+		body = output.Body
+		if output.ContentLength != nil {
+			storageSize = uint64(*output.ContentLength)
+		}
+	}
+
 	result = &StorageResponse{
 		Response: &SuccessfulResponse{
-			Body:         output.Body,
+			Body:         body,
 			LastModified: output.LastModified,
 			ETag:         output.ETag,
-			Size:         uint64(*output.ContentLength),
+			Size:         storageSize,
 		},
 	}
 
