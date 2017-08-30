@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/tilezen/tapalcatl"
+	"io/ioutil"
 	"net/http"
 	"testing"
 	"time"
@@ -30,7 +32,7 @@ func (m *mockS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
 		*lastMod = time.Date(2016, time.November, 17, 12, 27, 0, 0, time.UTC)
 
 		obj := &s3.GetObjectOutput{
-			Body:          &emptyReadCloser{},
+			Body:          ioutil.NopCloser(&bytes.Buffer{}),
 			ETag:          etag,
 			LastModified:  lastMod,
 			ContentLength: length,

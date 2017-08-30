@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/tilezen/tapalcatl"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"testing"
 	"time"
@@ -107,28 +107,6 @@ func TestHandlerMiss(t *testing.T) {
 	}
 }
 
-type emptyReadCloser struct{}
-
-func (_ *emptyReadCloser) Read(_ []byte) (int, error) {
-	return 0, io.EOF
-}
-
-func (_ *emptyReadCloser) Close() error {
-	return nil
-}
-
-type bufferReadCloser struct {
-	reader *bytes.Reader
-}
-
-func (b *bufferReadCloser) Read(p []byte) (int, error) {
-	return b.reader.Read(p)
-}
-
-func (b *bufferReadCloser) Close() error {
-	return nil
-}
-
 func TestHandlerHit(t *testing.T) {
 	tile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: tile}
@@ -151,7 +129,7 @@ func TestHandlerHit(t *testing.T) {
 	}
 	storage.storage[metatile] = &StorageResponse{
 		Response: &SuccessfulResponse{
-			Body:         &bufferReadCloser{reader: bytes.NewReader(zipfile.Bytes())},
+			Body:         ioutil.NopCloser(bytes.NewReader(zipfile.Bytes())),
 			LastModified: &lastModified,
 			ETag:         &etag,
 		},
