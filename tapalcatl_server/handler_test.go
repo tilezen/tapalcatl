@@ -35,8 +35,8 @@ type fakeParser struct {
 
 func (f *fakeParser) Parse(_ *http.Request) (*ParseResult, error) {
 	result := &ParseResult{
-		Coord:       f.tile,
-		ContentType: "application/json",
+		AdditionalData: &MetatileParseData{Coord: f.tile},
+		ContentType:    "application/json",
 	}
 	return result, nil
 }
@@ -56,6 +56,10 @@ func (f *fakeStorage) Fetch(t tapalcatl.TileCoord, _ Condition) (*StorageRespons
 
 func (f *fakeStorage) HealthCheck() error {
 	return nil
+}
+
+func (f *fakeStorage) TileJson(fmt TileJsonFormat, c Condition) (*StorageResponse, error) {
+	return nil, nil
 }
 
 type fakeResponseWriter struct {
@@ -82,6 +86,7 @@ func (_ *NilJsonLogger) Info(_ string, _ ...interface{})                   {}
 func (_ *NilJsonLogger) Warning(_ LogCategory, _ string, _ ...interface{}) {}
 func (_ *NilJsonLogger) Error(_ LogCategory, _ string, _ ...interface{})   {}
 func (_ *NilJsonLogger) Metrics(_ map[string]interface{})                  {}
+func (_ *NilJsonLogger) TileJson(_ map[string]interface{})                 {}
 func (_ *NilJsonLogger) ExpVars()                                          {}
 
 func TestHandlerMiss(t *testing.T) {

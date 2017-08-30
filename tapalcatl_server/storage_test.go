@@ -30,9 +30,10 @@ func (m *mockS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
 		*lastMod = time.Date(2016, time.November, 17, 12, 27, 0, 0, time.UTC)
 
 		obj := &s3.GetObjectOutput{
-			Body:         &emptyReadCloser{},
-			ETag:         etag,
-			LastModified: lastMod,
+			Body:          &emptyReadCloser{},
+			ETag:          etag,
+			LastModified:  lastMod,
+			ContentLength: length,
 		}
 		return obj, nil
 
@@ -134,9 +135,10 @@ func (n *nullBodyS3) GetObject(i *s3.GetObjectInput) (*s3.GetObjectOutput, error
 	*lastMod = time.Date(2016, time.November, 17, 12, 27, 0, 0, time.UTC)
 
 	obj := &s3.GetObjectOutput{
-		Body:         nil,
-		ETag:         etag,
-		LastModified: lastMod,
+		Body:          nil,
+		ETag:          etag,
+		LastModified:  lastMod,
+		ContentLength: length,
 	}
 	return obj, nil
 }
