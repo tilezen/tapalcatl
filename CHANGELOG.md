@@ -1,6 +1,11 @@
 CHANGELOG
 =========
 
+v1.4.0
+------
+* Add tilejson handler
+* Ensure it's safe to always close S3 response body
+
 v1.3.0
 ------
 * Clamp to tile requests to 0/0/0 (don't allow negative tile coordinates)
