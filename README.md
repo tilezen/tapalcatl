@@ -1,7 +1,7 @@
 Tapalcatl
 =========
 
-Tapalcatl is a "metatile server", which takes requests for a specific single format and tile coordinate and makes a request upstream for a "metatile" or bundle of tiles which contains the tile originally requested.
+Tapalcatl is a "metatile server", which takes requests for a specific single format and tile coordinate and makes a request upstream for a "metatile" or bundle of tiles which contains the tile originally requested. There is also a Python version optimized for Lambda functions in [tapalcatl-py](https://github.com/tilezen/tapalcatl-py).
 
 For example:
 
