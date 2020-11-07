@@ -4,11 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"github.com/tilezen/tapalcatl"
 	"io/ioutil"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/tilezen/tapalcatl"
 )
 
 func makeTestZip(tile tapalcatl.TileCoord, content string) (*bytes.Buffer, error) {

@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/tilezen/tapalcatl"
 	"io"
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/tilezen/tapalcatl"
 )
 
 type HttpRequestData struct {

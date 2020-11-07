@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	"github.com/tilezen/tapalcatl"
 	"io/ioutil"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+
+	"github.com/tilezen/tapalcatl"
 )
 
 type mockS3 struct {
