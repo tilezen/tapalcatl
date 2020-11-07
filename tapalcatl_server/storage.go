@@ -4,17 +4,19 @@ import (
 	"bytes"
 	"crypto/md5"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	"github.com/imkira/go-interpol"
-	"github.com/tilezen/tapalcatl"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/imkira/go-interpol"
+
+	"github.com/tilezen/tapalcatl"
 )
 
 type Condition struct {

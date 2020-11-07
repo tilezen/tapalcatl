@@ -4,6 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+
 	"github.com/NYTimes/gziphandler"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -12,14 +19,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
 	"github.com/oxtoacart/bpool"
-	"github.com/tilezen/tapalcatl"
 	"github.com/whosonfirst/go-httpony/stats"
-	"log"
-	"net"
-	"net/http"
-	"os"
-	"strconv"
-	"time"
+
+	"github.com/tilezen/tapalcatl"
 )
 
 // the handler config is the container for the json configuration
