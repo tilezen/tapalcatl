@@ -1,4 +1,4 @@
-package tapalcatl
+package tile
 
 import (
 	"archive/zip"

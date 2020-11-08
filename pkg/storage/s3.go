@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"bytes"
@@ -6,77 +6,15 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"os"
-	"path/filepath"
 	"strconv"
-	"time"
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/imkira/go-interpol"
 
-	"github.com/tilezen/tapalcatl"
+	"github.com/tilezen/tapalcatl/pkg/tile"
 )
-
-type Condition struct {
-	IfModifiedSince *time.Time
-	IfNoneMatch     *string
-}
-
-type SuccessfulResponse struct {
-	Body         io.ReadCloser
-	LastModified *time.Time
-	ETag         *string
-	Size         uint64
-}
-
-type StorageResponse struct {
-	Response    *SuccessfulResponse
-	NotModified bool
-	NotFound    bool
-}
-
-type TileJsonFormat int
-
-const (
-	TileJsonFormat_Mvt = iota
-	TileJsonFormat_Json
-	TileJsonFormat_Topojson
-)
-
-func (f *TileJsonFormat) Name() string {
-	switch *f {
-	case TileJsonFormat_Mvt:
-		return "mapbox"
-	case TileJsonFormat_Json:
-		return "geojson"
-	case TileJsonFormat_Topojson:
-		return "topojson"
-	}
-	panic(fmt.Sprintf("Unknown tilejson format: %d", int(*f)))
-}
-
-func NewTileJsonFormat(name string) *TileJsonFormat {
-	var format TileJsonFormat
-	switch name {
-	case "mapbox":
-		format = TileJsonFormat_Mvt
-	case "geojson":
-		format = TileJsonFormat_Json
-	case "topojson":
-		format = TileJsonFormat_Topojson
-	default:
-		return nil
-	}
-	return &format
-}
-
-type Storage interface {
-	Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error)
-	TileJson(f TileJsonFormat, c Condition) (*StorageResponse, error)
-	HealthCheck() error
-}
 
 type S3Storage struct {
 	client          s3iface.S3API
@@ -99,13 +37,13 @@ func NewS3Storage(api s3iface.S3API, bucket, keyPattern, prefix, layer string, h
 	}
 }
 
-func (s *S3Storage) s3Hash(t tapalcatl.TileCoord) string {
+func (s *S3Storage) s3Hash(t tile.TileCoord) string {
 	to_hash := fmt.Sprintf("/%s/%d/%d/%d.%s", s.layer, t.Z, t.X, t.Y, t.Format)
 	hash := md5.Sum([]byte(to_hash))
 	return fmt.Sprintf("%x", hash)[0:5]
 }
 
-func (s *S3Storage) objectKey(t tapalcatl.TileCoord) (string, error) {
+func (s *S3Storage) objectKey(t tile.TileCoord) (string, error) {
 	m := map[string]string{
 		"z":      strconv.Itoa(t.Z),
 		"x":      strconv.Itoa(t.X),
@@ -173,7 +111,7 @@ func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, e
 	return result, nil
 }
 
-func (s *S3Storage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error) {
+func (s *S3Storage) Fetch(t tile.TileCoord, c Condition) (*StorageResponse, error) {
 	key, err := s.objectKey(t)
 	if err != nil {
 		return nil, err
@@ -198,62 +136,4 @@ func (s *S3Storage) TileJson(f TileJsonFormat, c Condition) (*StorageResponse, e
 	hashUrlPathSegment := fmt.Sprintf("%x", hash)[0:5]
 	key := fmt.Sprintf("%s/%s/%s", s.prefix, hashUrlPathSegment, toHash)
 	return s.respondWithKey(key, c)
-}
-
-type FileStorage struct {
-	baseDir     string
-	layer       string
-	healthcheck string
-}
-
-func NewFileStorage(baseDir, layer string, healthcheck string) *FileStorage {
-	return &FileStorage{
-		baseDir:     baseDir,
-		layer:       layer,
-		healthcheck: healthcheck,
-	}
-}
-
-func respondWithPath(path string) (*StorageResponse, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			resp := &StorageResponse{
-				NotFound: true,
-			}
-			return resp, nil
-
-		} else {
-			return nil, err
-		}
-	} else {
-		resp := &StorageResponse{
-			Response: &SuccessfulResponse{
-				Body: file,
-			},
-		}
-		return resp, nil
-	}
-}
-
-func (f *FileStorage) Fetch(t tapalcatl.TileCoord, c Condition) (*StorageResponse, error) {
-	tilepath := filepath.Join(f.baseDir, f.layer, filepath.FromSlash(t.FileName()))
-	return respondWithPath(tilepath)
-}
-
-func (s *FileStorage) TileJson(f TileJsonFormat, c Condition) (*StorageResponse, error) {
-	dirpath := "tilejson"
-	tileJsonExt := "json"
-	filename := fmt.Sprintf("%s.%s", f.Name(), tileJsonExt)
-	tilejsonPath := filepath.Join(s.baseDir, dirpath, filename)
-	return respondWithPath(tilejsonPath)
-}
-
-func (s *FileStorage) HealthCheck() error {
-	tilepath := filepath.Join(s.baseDir, s.healthcheck)
-	f, err := os.Open(tilepath)
-	if err != nil {
-		err = f.Close()
-	}
-	return err
 }
