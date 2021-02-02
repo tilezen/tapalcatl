@@ -1,12 +1,11 @@
-FROM golang:1.8
+FROM golang:1.15
 
 WORKDIR /go/src/app
 COPY . .
 
-RUN go get -u github.com/tilezen/tapalcatl/tapalcatl_server \
- && go install github.com/tilezen/tapalcatl/tapalcatl_server
+RUN go install github.com/tilezen/tapalcatl/tapalcatl_server
 
-ENV TAPALCATL_LISTEN=":8000"
-EXPOSE 8000
+ENV TAPALCATL_LISTEN=":8080"
+EXPOSE 8080
 
 CMD ["tapalcatl_server"]

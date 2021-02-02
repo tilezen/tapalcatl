@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"bytes"
@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 
-	"github.com/tilezen/tapalcatl"
+	"github.com/tilezen/tapalcatl/pkg/tile"
 )
 
 type mockS3 struct {
@@ -57,7 +57,7 @@ func TestS3StorageEmpty(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
-	resp, err := storage.Fetch(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
+	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
@@ -80,7 +80,7 @@ func TestS3Storage(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
-	tile := tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
+	tile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
 	key, err := storage.objectKey(tile)
 	if err != nil {
 		t.Fatalf("Unable to calculate key for tile: %s", err.Error())
@@ -160,7 +160,7 @@ func TestS3StorageNullBody(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
-	resp, err := storage.Fetch(tapalcatl.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
+	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
 	if err != nil {
 		t.Fatalf("Unable to Get tile from null body S3: %s", err.Error())
 	}
