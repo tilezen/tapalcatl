@@ -14,7 +14,6 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/metrics"
 	"github.com/tilezen/tapalcatl/pkg/storage"
 	"github.com/tilezen/tapalcatl/pkg/tile"
-	"github.com/tilezen/tapalcatl/tapalcatl_server"
 )
 
 func makeTestZip(tile tile.TileCoord, content string) (*bytes.Buffer, error) {
@@ -39,9 +38,9 @@ type fakeParser struct {
 	tile tile.TileCoord
 }
 
-func (f *fakeParser) Parse(_ *http.Request) (*main.ParseResult, error) {
-	result := &main.ParseResult{
-		AdditionalData: &main.MetatileParseData{Coord: f.tile},
+func (f *fakeParser) Parse(_ *http.Request) (*ParseResult, error) {
+	result := &ParseResult{
+		AdditionalData: &MetatileParseData{Coord: f.tile},
 		ContentType:    "application/json",
 	}
 	return result, nil
@@ -96,8 +95,8 @@ func (_ *NilJsonLogger) TileJson(_ map[string]interface{})                     {
 func (_ *NilJsonLogger) ExpVars()                                              {}
 
 func TestHandlerMiss(t *testing.T) {
-	tile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
-	parser := &fakeParser{tile: tile}
+	theTile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
+	parser := &fakeParser{tile: theTile}
 	mimes := map[string]string{
 		"json": "application/json",
 	}
@@ -114,15 +113,15 @@ func TestHandlerMiss(t *testing.T) {
 }
 
 func TestHandlerHit(t *testing.T) {
-	tile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
-	parser := &fakeParser{tile: tile}
+	theTile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
+	parser := &fakeParser{tile: theTile}
 	mimes := map[string]string{
 		"json": "application/json",
 	}
 	stg := &fakeStorage{storage: make(map[tile.TileCoord]*storage.StorageResponse)}
 
 	metatile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
-	zipfile, err := makeTestZip(tile, "{}")
+	zipfile, err := makeTestZip(theTile, "{}")
 	if err != nil {
 		t.Fatalf("Unable to make test zip: %s", err.Error())
 	}
