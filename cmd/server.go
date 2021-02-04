@@ -170,9 +170,6 @@ func main() {
 		if rhc.Layer != nil {
 			layer = *rhc.Layer
 		}
-		if layer == "" {
-			logFatalCfgErr(logger, "Missing layer for storage: %s", storageDefinitionName)
-		}
 
 		var healthcheck string
 

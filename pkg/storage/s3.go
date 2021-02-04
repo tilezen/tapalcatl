@@ -38,8 +38,18 @@ func NewS3Storage(api s3iface.S3API, bucket, keyPattern, prefix, layer string, h
 }
 
 func (s *S3Storage) s3Hash(t tile.TileCoord) string {
-	to_hash := fmt.Sprintf("/%s/%d/%d/%d.%s", s.layer, t.Z, t.X, t.Y, t.Format)
-	hash := md5.Sum([]byte(to_hash))
+	toHash := fmt.Sprintf("%d/%d/%d.%s", t.Z, t.X, t.Y, t.Format)
+
+	// In versions of code before https://github.com/tilezen/tilequeue/pull/344,
+	// we included the layer and leading slash in the hashed string. after that
+	// PR, we no longer support having a layer in the path and _also_ drop the
+	// leading slash from the hashed string.
+	if s.layer != "" {
+		toHash = fmt.Sprintf("/%s/%s", s.layer, toHash)
+	}
+
+	hash := md5.Sum([]byte(toHash))
+
 	return fmt.Sprintf("%x", hash)[0:5]
 }
 
