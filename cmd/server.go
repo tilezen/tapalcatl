@@ -268,8 +268,8 @@ func main() {
 	if len(healthcheck) > 0 {
 		storagesToCheck := make([]storage.Storage, len(healthCheckStorages))
 		i := 0
-		for _, storage := range healthCheckStorages {
-			storagesToCheck[i] = storage
+		for _, s := range healthCheckStorages {
+			storagesToCheck[i] = s
 			i++
 		}
 		hc := handler.HealthCheckHandler(storagesToCheck, logger)
