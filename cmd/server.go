@@ -277,10 +277,13 @@ func main() {
 	}
 
 	corsHandler := handlers.CORS()(r)
+	loggingHandler := log.LoggingMiddleware(logger)(corsHandler)
 
-	logger.Info("Server started and listening on %s\n", listen)
+	logger.Info("Server started and listening on %s", listen)
 
-	systemLogger.Fatal(http.ListenAndServe(listen, corsHandler))
+	err = http.ListenAndServe(listen, loggingHandler)
+
+	systemLogger.Fatalf("Failed to listen: %+v", err)
 }
 
 func logFatalCfgErr(logger log.JsonLogger, msg string, xs ...interface{}) {
