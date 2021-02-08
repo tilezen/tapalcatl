@@ -8,8 +8,10 @@ import (
 
 	"github.com/NYTimes/gziphandler"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
@@ -126,13 +128,13 @@ func main() {
 	// set if we have s3 storage configured, and shared across all s3 sessions
 	var awsSession *session.Session
 
-	for _, sd := range hc.Storage {
+	for sName, sd := range hc.Storage {
 		t := sd.Type
 		switch t {
 		case "s3":
 		case "file":
 		default:
-			logFatalCfgErr(logger, "Unknown storage type: %s", t)
+			logFatalCfgErr(logger, "Unknown storage type for storage %s: %s", sName, t)
 		}
 	}
 
@@ -192,6 +194,15 @@ func main() {
 			if err != nil {
 				logFatalCfgErr(logger, "Unable to set up AWS session: %s", err.Error())
 			}
+
+			var s3Client s3iface.S3API
+			if hc.Aws.Role != nil {
+				creds := stscreds.NewCredentials(awsSession, *hc.Aws.Role)
+				s3Client = s3.New(awsSession, &aws.Config{Credentials: creds})
+			} else {
+				s3Client = s3.New(awsSession)
+			}
+
 			keyPattern := sd.KeyPattern
 			if rhc.KeyPattern != nil {
 				keyPattern = *rhc.KeyPattern
@@ -208,7 +219,6 @@ func main() {
 				logger.Warning(log.LogCategory_ConfigError, "Missing healthcheck for storage s3")
 			}
 
-			s3Client := s3.New(awsSession)
 			healthcheck = sd.Healthcheck
 			stg = storage.NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer, healthcheck)
 

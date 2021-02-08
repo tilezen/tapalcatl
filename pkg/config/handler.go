@@ -34,7 +34,10 @@ func (h *HandlerConfig) Set(line string) error {
 
 // generic aws configuration applied to whole session
 type awsConfig struct {
+	// the AWS region requests will be coming from
 	Region *string
+	// attempt to assume this AWS IAM role when making requests to S3
+	Role *string
 }
 
 type storageDefinition struct {
