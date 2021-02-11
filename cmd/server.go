@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	golog "log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
+	"time"
 
 	"github.com/NYTimes/gziphandler"
 	"github.com/aws/aws-sdk-go/aws"
@@ -16,6 +21,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
 	"github.com/oxtoacart/bpool"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 
 	"github.com/tilezen/tapalcatl/pkg/buffer"
 	"github.com/tilezen/tapalcatl/pkg/config"
@@ -26,8 +33,15 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
 
+const (
+	// The time to wait after responding /ready with non-200 before starting to shut down the HTTP server
+	gracefulShutdownSleep = 20 * time.Second
+	// The time to wait for the in-flight HTTP requests to complete before exiting
+	gracefulShutdownTimeout = 5 * time.Second
+)
+
 func main() {
-	var listen, healthcheck string
+	var listen, healthcheck, readyCheck string
 	var poolNumEntries, poolEntrySize int
 	var metricsStatsdAddr, metricsStatsdPrefix string
 
@@ -81,6 +95,7 @@ func main() {
 	f.StringVar(&listen, "listen", ":8080", "interface and port to listen on")
 	f.String("config", "", "Config file to read values from.")
 	f.StringVar(&healthcheck, "healthcheck", "", "A URL path for healthcheck. Intended for use by load balancer health checks.")
+	f.StringVar(&readyCheck, "readycheck", "", "A URL path for readiness check. Intended for use by Kubernetes readinessProbe.")
 
 	f.IntVar(&poolNumEntries, "poolnumentries", 0, "Number of buffers to pool.")
 	f.IntVar(&poolEntrySize, "poolentrysize", 0, "Size of each buffer in pool.")
@@ -286,14 +301,56 @@ func main() {
 		r.Handle(healthcheck, hc).Methods("GET")
 	}
 
+	// Readiness probe for graceful shutdown support
+	readinessResponseCode := uint32(http.StatusOK)
+	if len(readyCheck) > 0 {
+		r.HandleFunc(readyCheck, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(int(atomic.LoadUint32(&readinessResponseCode)))
+		})
+	}
+
 	corsHandler := handlers.CORS()(r)
 	loggingHandler := log.LoggingMiddleware(logger)(corsHandler)
 
 	logger.Info("Server started and listening on %s", listen)
 
-	err = http.ListenAndServe(listen, loggingHandler)
+	// Support for upgrading an http/1.1 connection to http/2
+	// See https://github.com/thrawn01/h2c-golang-example
+	http2Server := &http2.Server{}
+	server := &http.Server{
+		Addr:    listen,
+		Handler: h2c.NewHandler(loggingHandler, http2Server),
+	}
 
-	systemLogger.Fatalf("Failed to listen: %+v", err)
+	// Code to handle shutdown gracefully
+	shutdownChan := make(chan struct{})
+	go func() {
+		defer close(shutdownChan)
+
+		// Wait for SIGTERM to come in
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGTERM)
+		<-signals
+
+		logger.Info("SIGTERM received. Starting graceful shutdown.")
+
+		// Start failing readiness probes
+		atomic.StoreUint32(&readinessResponseCode, http.StatusInternalServerError)
+		// Wait for upstream clients
+		time.Sleep(gracefulShutdownSleep)
+		// Begin shutdown of in-flight requests
+		shutdownCtx, shutdownCtxCancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Info("Error waiting for server shutdown: %+v", err)
+		}
+		shutdownCtxCancel()
+	}()
+
+	logger.Info("Service started")
+	if err := server.ListenAndServe(); err != nil {
+		logger.Info("Couldn't start HTTP server: %+v", err)
+	}
+	<-shutdownChan
 }
 
 func logFatalCfgErr(logger log.JsonLogger, msg string, xs ...interface{}) {
