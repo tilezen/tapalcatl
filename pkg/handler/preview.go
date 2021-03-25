@@ -15,6 +15,8 @@ func (f fileHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request
 	writer.Write(f.data.Bytes())
 }
 
+// NewFileHandler parses the filename given as a text template and renders it with the given templateData.
+// It returns an HTTP handler that serves the resulting rendered data to all requests.
 func NewFileHandler(filename string, templateData map[string]interface{}) (http.Handler, error) {
 	tpl, err := template.ParseFiles(filename)
 	if err != nil {
