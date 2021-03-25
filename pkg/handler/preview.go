@@ -29,6 +29,11 @@ func NewFileHandler(filename string) (http.Handler, error) {
 		return nil, fmt.Errorf("couldn't read file %s for handler: %w", filename, err)
 	}
 
+	err = f.Close()
+	if err != nil {
+		return nil, fmt.Errorf("couldn't close file %s after reading for handler: %w", filename, err)
+	}
+
 	handler := fileHandler{data: d}
 
 	return handler, nil
