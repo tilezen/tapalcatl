@@ -48,6 +48,8 @@ type previewConfig struct {
 	Path *string
 	// Template is a path on disk to the template to serve at the above URL.
 	Template *string
+	// Data is the data to use when rendering the template.
+	Data *map[string]interface{}
 }
 
 type storageDefinition struct {

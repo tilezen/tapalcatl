@@ -40,7 +40,7 @@
             ],
             sources: {
                 mapzen: {
-                    url: 'tilezen/vector/v1/all/{z}/{x}/{y}.mvt',
+                    url: '{{ .tilepath }}',
                     url_params: {
                     },
                     tile_size: 512,

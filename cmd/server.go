@@ -295,7 +295,12 @@ func main() {
 			systemLogger.Fatalf("ERROR: Preview must have path and template specified")
 		}
 
-		fileHandler, err := handler.NewFileHandler(*hc.Preview.Template)
+		var templateData map[string]interface{}
+		if hc.Preview.Data != nil {
+			templateData = *hc.Preview.Data
+		}
+
+		fileHandler, err := handler.NewFileHandler(*hc.Preview.Template, templateData)
 		if err != nil {
 			systemLogger.Fatalf("ERROR: Couldn't load preview template: %+v", err)
 		}
