@@ -68,6 +68,7 @@ func main() {
      storage name string -> {
         Type string storage type, can be "s3" or "file
         MetatileSize int      Number of 256px tiles in each dimension of the metatile.
+        MetatileMaxDetailZoom int Maximum level of detail available in the metatiles.
         TileSize int        Size of tile in 256px tile units.
 
        (s3 storage)
@@ -173,6 +174,7 @@ func main() {
 		if !tile.IsPowerOfTwo(metatileSize) {
 			logFatalCfgErr(logger, "Metatile size must be power of two, but %d is not", metatileSize)
 		}
+
 		tileSize := 1
 		if sd.TileSize != nil {
 			tileSize = *sd.TileSize
@@ -183,6 +185,12 @@ func main() {
 		if !tile.IsPowerOfTwo(tileSize) {
 			logFatalCfgErr(logger, "Tile size must be power of two, but %d is not", tileSize)
 		}
+
+		metatileMaxDetailZoom := 0
+		if sd.MetatileMaxDetailZoom != nil {
+			metatileMaxDetailZoom = *sd.MetatileMaxDetailZoom
+		}
+
 		layer := sd.Layer
 		if rhc.Layer != nil {
 			layer = *rhc.Layer
@@ -274,7 +282,7 @@ func main() {
 				MimeMap: hc.Mime,
 			}
 
-			h := handler.MetatileHandler(parser, metatileSize, tileSize, hc.Mime, stg, bufferManager, mw, logger)
+			h := handler.MetatileHandler(parser, metatileSize, tileSize, metatileMaxDetailZoom, hc.Mime, stg, bufferManager, mw, logger)
 			gzipped := gziphandler.GzipHandler(h)
 
 			r.Handle(reqPattern, gzipped).Methods("GET")

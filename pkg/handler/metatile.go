@@ -18,7 +18,14 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
 
-func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]string, storage storage.Storage, bufferManager buffer.BufferManager, mw metrics.MetricsWriter, logger log.JsonLogger) http.Handler {
+func MetatileHandler(
+	p Parser,
+	metatileSize, tileSize, metatileMaxDetailZoom int,
+	mimeMap map[string]string,
+	storage storage.Storage,
+	bufferManager buffer.BufferManager,
+	mw metrics.MetricsWriter,
+	logger log.JsonLogger) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 
@@ -84,7 +91,7 @@ func MetatileHandler(p Parser, metatileSize, tileSize int, mimeMap map[string]st
 		reqState.Format = reqState.Coord.Format
 		reqState.HttpData = parseResult.HttpData
 
-		metaCoord, offset, err := metatileData.Coord.MetaAndOffset(metatileSize, tileSize)
+		metaCoord, offset, err := metatileData.Coord.MetaAndOffset(metatileSize, tileSize, metatileMaxDetailZoom)
 		if err != nil {
 			logger.Warning(log.LogCategory_ConfigError, "MetaAndOffset could not be calculated: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
