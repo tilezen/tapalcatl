@@ -10,6 +10,7 @@ type HandlerConfig struct {
 	Storage map[string]storageDefinition
 	Pattern map[string]routeHandlerConfig
 	Mime    map[string]string
+	Preview *previewConfig
 }
 
 func (h *HandlerConfig) String() string {
@@ -38,6 +39,17 @@ type awsConfig struct {
 	Region *string
 	// attempt to assume this AWS IAM role when making requests to S3
 	Role *string
+}
+
+// previewConfig is the container for configuring a preview webpage.
+// Both attributes are required if preview is specified.
+type previewConfig struct {
+	// Path is the HTTP path to register to serve the given template.
+	Path *string
+	// Template is a path on disk to the template to serve at the above URL.
+	Template *string
+	// Data is the data to use when rendering the template.
+	Data *map[string]interface{}
 }
 
 type storageDefinition struct {

@@ -290,6 +290,24 @@ func main() {
 
 	}
 
+	if hc.Preview != nil {
+		if hc.Preview.Path == nil || hc.Preview.Template == nil {
+			systemLogger.Fatalf("ERROR: Preview must have path and template specified")
+		}
+
+		var templateData map[string]interface{}
+		if hc.Preview.Data != nil {
+			templateData = *hc.Preview.Data
+		}
+
+		fileHandler, err := handler.NewFileHandler(*hc.Preview.Template, templateData)
+		if err != nil {
+			systemLogger.Fatalf("ERROR: Couldn't load preview template: %+v", err)
+		}
+
+		r.Handle(*hc.Preview.Path, fileHandler).Methods("GET")
+	}
+
 	if len(healthcheck) > 0 {
 		storagesToCheck := make([]storage.Storage, len(healthCheckStorages))
 		i := 0
