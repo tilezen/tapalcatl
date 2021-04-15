@@ -113,12 +113,13 @@ func (t TileCoord) MetaAndOffset(metaSize, tileSize, metatileMaxDetailZoom int) 
 		meta.X = t.X >> iDeltaZ
 		meta.Y = t.Y >> iDeltaZ
 		meta.Format = "zip"
-
-		offset.Z = t.Z - meta.Z
-		offset.X = t.X - (meta.X << deltaZ)
-		offset.Y = t.Y - (meta.Y << deltaZ)
-		offset.Format = t.Format
 	}
+
+	actualDeltaZ := t.Z - meta.Z
+	offset.Z = actualDeltaZ
+	offset.X = t.X - (meta.X << actualDeltaZ)
+	offset.Y = t.Y - (meta.Y << actualDeltaZ)
+	offset.Format = t.Format
 
 	return
 }
