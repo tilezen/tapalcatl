@@ -77,8 +77,8 @@ func coordEquals(t *testing.T, name string, exp, act TileCoord) {
 	}
 }
 
-func checkMetaOffset(t *testing.T, metaSize, tileSize int, coord, exp_meta, exp_offset TileCoord) {
-	meta, offset, err := coord.MetaAndOffset(metaSize, tileSize)
+func checkMetaOffset(t *testing.T, metaSize, tileSize, maxDetailZoom int, coord, exp_meta, exp_offset TileCoord) {
+	meta, offset, err := coord.MetaAndOffset(metaSize, tileSize, maxDetailZoom)
 	if err != nil {
 		t.Fatalf("Expected result from MetaAndOffset, but got error: %s", err.Error())
 	}
@@ -87,40 +87,46 @@ func checkMetaOffset(t *testing.T, metaSize, tileSize int, coord, exp_meta, exp_
 }
 
 func TestMetaOffset(t *testing.T) {
-	checkMetaOffset(t, 1, 1,
+	checkMetaOffset(t, 1, 1, 0,
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
 
-	checkMetaOffset(t, 1, 1,
+	checkMetaOffset(t, 1, 1, 0,
 		TileCoord{Z: 12, X: 637, Y: 936, Format: "json"},
 		TileCoord{Z: 12, X: 637, Y: 936, Format: "zip"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
 
-	checkMetaOffset(t, 2, 1,
+	checkMetaOffset(t, 2, 1, 0,
 		TileCoord{Z: 12, X: 637, Y: 936, Format: "json"},
 		TileCoord{Z: 11, X: 318, Y: 468, Format: "zip"},
 		TileCoord{Z: 1, X: 1, Y: 0, Format: "json"})
 
-	checkMetaOffset(t, 2, 2,
+	checkMetaOffset(t, 2, 2, 0,
 		TileCoord{Z: 12, X: 637, Y: 936, Format: "json"},
 		TileCoord{Z: 12, X: 637, Y: 936, Format: "zip"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
 
-	checkMetaOffset(t, 8, 1,
+	checkMetaOffset(t, 8, 1, 0,
 		TileCoord{Z: 12, X: 637, Y: 935, Format: "json"},
 		TileCoord{Z: 9, X: 79, Y: 116, Format: "zip"},
 		TileCoord{Z: 3, X: 5, Y: 7, Format: "json"})
 
 	// check that the "512px" 0/0/0 tile is accessible.
-	checkMetaOffset(t, 2, 2,
+	checkMetaOffset(t, 2, 2, 0,
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
 
 	// check that when the metatile would be smaller than the world (i.e: zoom < 0) then it just stops at 0 and we get the offset to the 0/0/0 tile.
-	checkMetaOffset(t, 2, 1,
+	checkMetaOffset(t, 2, 1, 0,
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"},
 		TileCoord{Z: 0, X: 0, Y: 0, Format: "json"})
+
+	// check that max detail zoom works as expected
+	checkMetaOffset(t, 8, 2, 13,
+		TileCoord{Z: 16, X: 37311, Y: 18976, Format: "json"},
+		TileCoord{Z: 13, X: 4663, Y: 2372, Format: "zip"},
+		TileCoord{Z: 3, X: 7, Y: 0, Format: "json"})
 }

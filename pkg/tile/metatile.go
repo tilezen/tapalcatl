@@ -47,6 +47,14 @@ func sizeToZoom(v uint) uint {
 	return r
 }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}
+
 // MetaAndOffset returns the metatile coordinate and the offset within it for
 // this TileCoord object. The argument metaSize indicates the size of the
 // metatile and tileSize indicates the size of the tile within the metatile
@@ -55,7 +63,7 @@ func sizeToZoom(v uint) uint {
 // For example, to extract a 1x1 regular 256px tile from a 2x2 metatile, one
 // would call MetaAndOffset(2, 1). To extract the 512px tile from the same,
 // call MetaAndOffset(2, 2).
-func (t TileCoord) MetaAndOffset(metaSize, tileSize int) (meta, offset TileCoord, err error) {
+func (t TileCoord) MetaAndOffset(metaSize, tileSize, metatileMaxDetailZoom int) (meta, offset TileCoord, err error) {
 	// check that sizes are powers of two before proceeding.
 	if !IsPowerOfTwo(metaSize) {
 		err = fmt.Errorf("Metatile size is required to be a power of two, but %d is not.", metaSize)
@@ -89,22 +97,29 @@ func (t TileCoord) MetaAndOffset(metaSize, tileSize int) (meta, offset TileCoord
 		meta.Y = 0
 		meta.Format = "zip"
 
-		offset.Z = 0
-		offset.X = 0
-		offset.Y = 0
-		offset.Format = t.Format
-
 	} else {
-		meta.Z = t.Z - iDeltaZ
-		meta.X = t.X >> deltaZ
-		meta.Y = t.Y >> deltaZ
-		meta.Format = "zip"
+		// Allows setting a maximum detail level beyond which all features are
+		// present in the tile and requests with tileSize larger than are
+		// available can be satisfied with "smaller" tiles that are present.
+		if metatileMaxDetailZoom > 0 && t.Z-iDeltaZ > metatileMaxDetailZoom {
+			// The call to min() is here to clamp the size of the offset - the
+			// idea being that it's better to request a metatile that isn't
+			// present and 404, rather than request one that is, pay the cost
+			// of unzipping it, and find it doesn't contain the offset.
+			iDeltaZ = min(t.Z-metatileMaxDetailZoom, int(metaZoom))
+		}
 
-		offset.Z = t.Z - meta.Z
-		offset.X = t.X - (meta.X << deltaZ)
-		offset.Y = t.Y - (meta.Y << deltaZ)
-		offset.Format = t.Format
+		meta.Z = t.Z - iDeltaZ
+		meta.X = t.X >> iDeltaZ
+		meta.Y = t.Y >> iDeltaZ
+		meta.Format = "zip"
 	}
+
+	actualDeltaZ := t.Z - meta.Z
+	offset.Z = actualDeltaZ
+	offset.X = t.X - (meta.X << actualDeltaZ)
+	offset.Y = t.Y - (meta.Y << actualDeltaZ)
+	offset.Format = t.Format
 
 	return
 }

@@ -10,5 +10,5 @@ require (
 	github.com/imkira/go-interpol v1.1.0
 	github.com/namsral/flag v1.7.4-pre
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c
-	github.com/whosonfirst/go-httpony v0.0.0-20161015171754-c345d005e965
+	golang.org/x/net v0.0.0-20200202094626-16171245cfb2
 )

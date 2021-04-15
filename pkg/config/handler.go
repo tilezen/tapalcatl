@@ -57,7 +57,11 @@ type storageDefinition struct {
 
 	// common fields across all storage types
 	// these can be overridden in specific storage configuration
+
+	// MetatileSize is the size of a tile contained in a metatile bundle (relative to a 256px tile)
 	MetatileSize int
+	// MetatileMaxDetailZoom is the zoom level where all features are present in the tile
+	MetatileMaxDetailZoom *int
 
 	// TileSize indicates the size of tile for this pattern. The default is 1.
 	TileSize *int
