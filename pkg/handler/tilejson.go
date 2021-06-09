@@ -14,7 +14,7 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/storage"
 )
 
-func TileJsonHandler(p Parser, storage storage.Storage, mw metrics.MetricsWriter, logger log.JsonLogger) http.Handler {
+func TileJsonHandler(p Parser, stg storage.Storage, mw metrics.MetricsWriter, logger log.JsonLogger) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		tileJsonReqState := state.TileJsonRequestState{}
 
@@ -57,7 +57,7 @@ func TileJsonHandler(p Parser, storage storage.Storage, mw metrics.MetricsWriter
 		tileJsonReqState.Format = &tileJsonData.Format
 
 		storageFetchStart := time.Now()
-		storageResult, err := storage.TileJson(tileJsonData.Format, parseResult.Cond)
+		storageResult, err := stg.TileJson(tileJsonData.Format, parseResult.Cond, parseResult.BuildID)
 		tileJsonReqState.Duration.StorageFetch = time.Since(storageFetchStart)
 		if err != nil {
 			http.Error(rw, "Internal Server Error", http.StatusInternalServerError)

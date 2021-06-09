@@ -86,8 +86,8 @@ func main() {
      request pattern string -> {
        storage string Name of storage defintion to use
        list of optional storage configuration to use:
-       prefix is required for s3, others are optional overrides of relevant definition
-     	 Prefix string  Prefix to use in this bucket.
+         defaultPrefix is required for s3, others are optional overrides of relevant definition
+         DefaultPrefix string  DefaultPrefix to use in this bucket.
      }
    }
    Mime { extension -> content-type used in http response
@@ -200,10 +200,10 @@ func main() {
 
 		switch sd.Type {
 		case "s3":
-			if rhc.Prefix == nil {
-				logFatalCfgErr(logger, "S3 configuration requires prefix")
+			if rhc.DefaultPrefix == nil {
+				logFatalCfgErr(logger, "S3 configuration requires defaultPrefix")
 			}
-			prefix := *rhc.Prefix
+			prefix := *rhc.DefaultPrefix
 
 			if awsSession == nil {
 				if hc.Aws != nil && hc.Aws.Region != nil {

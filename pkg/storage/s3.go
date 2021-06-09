@@ -21,19 +21,19 @@ type S3Storage struct {
 	bucket          string
 	keyPattern      string
 	tilejsonPattern string
-	prefix          string
+	defaultPrefix   string
 	layer           string
 	healthcheck     string
 }
 
-func NewS3Storage(api s3iface.S3API, bucket, keyPattern, prefix, layer string, healthcheck string) *S3Storage {
+func NewS3Storage(api s3iface.S3API, bucket, keyPattern, defaultPrefix, layer string, healthcheck string) *S3Storage {
 	return &S3Storage{
-		client:      api,
-		bucket:      bucket,
-		keyPattern:  keyPattern,
-		prefix:      prefix,
-		layer:       layer,
-		healthcheck: healthcheck,
+		client:        api,
+		bucket:        bucket,
+		keyPattern:    keyPattern,
+		defaultPrefix: defaultPrefix,
+		layer:         layer,
+		healthcheck:   healthcheck,
 	}
 }
 
@@ -53,14 +53,19 @@ func (s *S3Storage) s3Hash(t tile.TileCoord) string {
 	return fmt.Sprintf("%x", hash)[0:5]
 }
 
-func (s *S3Storage) objectKey(t tile.TileCoord) (string, error) {
+func (s *S3Storage) objectKey(t tile.TileCoord, prefixOverride string) (string, error) {
+	actualPrefix := s.defaultPrefix
+	if prefixOverride != "" {
+		actualPrefix = prefixOverride
+	}
+
 	m := map[string]string{
 		"z":      strconv.Itoa(t.Z),
 		"x":      strconv.Itoa(t.X),
 		"y":      strconv.Itoa(t.Y),
 		"fmt":    t.Format,
 		"hash":   s.s3Hash(t),
-		"prefix": s.prefix,
+		"prefix": actualPrefix,
 		"layer":  s.layer,
 	}
 
@@ -121,8 +126,8 @@ func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, e
 	return result, nil
 }
 
-func (s *S3Storage) Fetch(t tile.TileCoord, c Condition) (*StorageResponse, error) {
-	key, err := s.objectKey(t)
+func (s *S3Storage) Fetch(t tile.TileCoord, c Condition, prefixOverride string) (*StorageResponse, error) {
+	key, err := s.objectKey(t, prefixOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -139,11 +144,15 @@ func (s *S3Storage) HealthCheck() error {
 	return err
 }
 
-func (s *S3Storage) TileJson(f TileJsonFormat, c Condition) (*StorageResponse, error) {
+func (s *S3Storage) TileJson(f TileJsonFormat, c Condition, prefixOverride string) (*StorageResponse, error) {
 	filename := f.Name()
 	toHash := fmt.Sprintf("/tilejson/%s.json", filename)
 	hash := md5.Sum([]byte(toHash))
 	hashUrlPathSegment := fmt.Sprintf("%x", hash)[0:5]
-	key := fmt.Sprintf("%s/%s/%s", s.prefix, hashUrlPathSegment, toHash)
+	actualPrefix := s.defaultPrefix
+	if prefixOverride != "" {
+		actualPrefix = prefixOverride
+	}
+	key := fmt.Sprintf("%s/%s/%s", actualPrefix, hashUrlPathSegment, toHash)
 	return s.respondWithKey(key, c)
 }
