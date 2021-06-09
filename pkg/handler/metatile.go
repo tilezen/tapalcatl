@@ -95,20 +95,24 @@ func MetatileHandler(
 			tileCache = &cache.NilCache{}
 		}
 
-		// TODO Add timing for cache get
+		cacheLookupStart := time.Now()
 		cached, err := tileCache.GetTile(parseResult)
+		reqState.Duration.CacheLookup = time.Since(cacheLookupStart)
 		if err != nil {
+			reqState.IsCacheLookupError = true
 			logger.Warning(log.LogCategory_ResponseError, "Error checking cache: %+v", err)
 		}
 
 		if cached != nil {
 			err := writeVectorTileResponse(reqState, rw, cached)
 			if err != nil {
-				// TODO Log error + stat here and continue to fetch the tile from metatile
 				logger.Error(log.LogCategory_ResponseError, "Failed to write cached response body: %#v", err)
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				reqState.ResponseState = state.ResponseState_Error
+				return
 			}
 
-			// TODO Log success and return early
+			// TODO Log cached success
 			return
 		}
 

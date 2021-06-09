@@ -103,6 +103,7 @@ type RequestState struct {
 	IsZipError           bool
 	IsResponseWriteError bool
 	IsCondError          bool
+	IsCacheLookupError   bool
 	Duration             ReqDuration
 	Coord                *tile.TileCoord
 	HttpData             HttpRequestData
@@ -145,12 +146,16 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	if reqState.IsCondError {
 		reqStateErrs["cond"] = true
 	}
+	if reqState.IsCacheLookupError {
+		reqStateErrs["cache_lookup"] = true
+	}
 	if len(reqStateErrs) > 0 {
 		result["error"] = reqStateErrs
 	}
 
 	result["timing"] = map[string]int64{
 		"parse":         reqState.Duration.Parse.Milliseconds(),
+		"cache_lookup":  reqState.Duration.CacheLookup.Milliseconds(),
 		"storage_fetch": reqState.Duration.StorageFetch.Milliseconds(),
 		"storage_read":  reqState.Duration.StorageRead.Milliseconds(),
 		"metatile_find": reqState.Duration.MetatileFind.Milliseconds(),
@@ -273,12 +278,13 @@ type ReqStorageMetadata struct {
 }
 
 type ReqDuration struct {
-	Parse, StorageFetch, StorageRead, MetatileFind, RespWrite, Total time.Duration
+	Parse, StorageFetch, CacheLookup, StorageRead, MetatileFind, RespWrite, Total time.Duration
 }
 
 // durations will be logged in milliseconds
 type JsonReqDuration struct {
 	Parse        int64
+	CacheLookup  int64
 	StorageFetch int64
 	StorageRead  int64
 	MetatileFind int64
