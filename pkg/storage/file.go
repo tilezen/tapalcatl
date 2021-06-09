@@ -14,7 +14,7 @@ type FileStorage struct {
 	healthcheck string
 }
 
-func NewFileStorage(baseDir, layer string, healthcheck string) *FileStorage {
+func NewFileStorage(baseDir, layer, healthcheck string) *FileStorage {
 	return &FileStorage{
 		baseDir:     baseDir,
 		layer:       layer,

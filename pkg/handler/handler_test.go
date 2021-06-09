@@ -85,24 +85,11 @@ func (f *fakeResponseWriter) WriteHeader(status int) {
 	f.status = status
 }
 
-type NilJsonLogger struct{}
-
-func (_ *NilJsonLogger) Log(_ map[string]interface{}, _ ...interface{})        {}
-func (_ *NilJsonLogger) Info(_ string, _ ...interface{})                       {}
-func (_ *NilJsonLogger) Warning(_ log.LogCategory, _ string, _ ...interface{}) {}
-func (_ *NilJsonLogger) Error(_ log.LogCategory, _ string, _ ...interface{})   {}
-func (_ *NilJsonLogger) Metrics(_ map[string]interface{})                      {}
-func (_ *NilJsonLogger) TileJson(_ map[string]interface{})                     {}
-func (_ *NilJsonLogger) ExpVars()                                              {}
-
 func TestHandlerMiss(t *testing.T) {
 	theTile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: theTile}
-	mimes := map[string]string{
-		"json": "application/json",
-	}
 	storage := &fakeStorage{storage: make(map[tile.TileCoord]*storage.StorageResponse)}
-	h := MetatileHandler(parser, 1, 1, 0, mimes, storage, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &NilJsonLogger{})
+	h := MetatileHandler(parser, 1, 1, 0, storage, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &log.NilJsonLogger{}, nil)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{
@@ -120,9 +107,6 @@ func TestHandlerMiss(t *testing.T) {
 func TestHandlerHit(t *testing.T) {
 	theTile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: theTile}
-	mimes := map[string]string{
-		"json": "application/json",
-	}
 	stg := &fakeStorage{storage: make(map[tile.TileCoord]*storage.StorageResponse)}
 
 	metatile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
@@ -145,7 +129,7 @@ func TestHandlerHit(t *testing.T) {
 		},
 	}
 
-	h := MetatileHandler(parser, 1, 1, 0, mimes, stg, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &NilJsonLogger{})
+	h := MetatileHandler(parser, 1, 1, 0, stg, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &log.NilJsonLogger{}, nil)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{

@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/gorilla/handlers"
@@ -25,6 +26,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/tilezen/tapalcatl/pkg/buffer"
+	"github.com/tilezen/tapalcatl/pkg/cache"
 	"github.com/tilezen/tapalcatl/pkg/config"
 	"github.com/tilezen/tapalcatl/pkg/handler"
 	"github.com/tilezen/tapalcatl/pkg/log"
@@ -44,6 +46,7 @@ func main() {
 	var listen, healthcheck, readyCheck string
 	var poolNumEntries, poolEntrySize int
 	var metricsStatsdAddr, metricsStatsdPrefix string
+	var dynamoCacheTableARN, dynamoCacheRegion, dynamoCacheRole string
 
 	hc := config.HandlerConfig{}
 
@@ -104,6 +107,10 @@ func main() {
 	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
 	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
 
+	f.StringVar(&dynamoCacheTableARN, "dynamo-cache-table-arn", "", "ARN of the DynamoDB table to use for caching purposes")
+	f.StringVar(&dynamoCacheRegion, "dynamo-cache-region", "", "Region to use when connecting to the DynamoDB table")
+	f.StringVar(&dynamoCacheRegion, "dynamo-cache-role", "", "ARN of the Role to use when connecting to the DynamoDB table")
+
 	err = f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
 		return
@@ -127,6 +134,28 @@ func main() {
 		bufferManager = bpool.NewSizedBufferPool(poolNumEntries, poolEntrySize)
 	} else {
 		bufferManager = &buffer.OnDemandBufferManager{}
+	}
+
+	var tileCache cache.Cache
+	if dynamoCacheTableARN != "" && dynamoCacheRegion != "" && dynamoCacheRole != "" {
+		logger.Info("Configured Dynamo to use AWS role %s", dynamoCacheRole)
+		awsSession, err := session.NewSessionWithOptions(session.Options{
+			Config: aws.Config{
+				Credentials: stscreds.NewCredentials(session.Must(session.NewSession()), dynamoCacheRole),
+				Region:      hc.Aws.Region,
+			},
+			SharedConfigState: session.SharedConfigEnable,
+		})
+
+		if err != nil {
+			logFatalCfgErr(logger, "Unable to set up AWS session for Dynamo: %s", err.Error())
+		}
+
+		dynamoClient := dynamodb.New(awsSession)
+
+		tileCache = cache.NewDynamoDBCache(dynamoClient, dynamoCacheTableARN)
+	} else {
+		tileCache = &cache.NilCache{}
 	}
 
 	// metrics writer configuration
@@ -282,7 +311,7 @@ func main() {
 				MimeMap: hc.Mime,
 			}
 
-			h := handler.MetatileHandler(parser, metatileSize, tileSize, metatileMaxDetailZoom, hc.Mime, stg, bufferManager, mw, logger)
+			h := handler.MetatileHandler(parser, metatileSize, tileSize, metatileMaxDetailZoom, stg, bufferManager, mw, logger, tileCache)
 			gzipped := gziphandler.GzipHandler(h)
 
 			r.Handle(reqPattern, gzipped).Methods("GET")
