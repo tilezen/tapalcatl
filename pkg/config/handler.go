@@ -88,10 +88,10 @@ type storageConfig struct {
 	// TileSize indicates the size of tile for this pattern. The default is 1.
 	TileSize *int
 
-	// Prefix is required to be set for s3 storage
-	Prefix     *string
-	KeyPattern *string
-	Layer      *string
+	// DefaultPrefix is required to be set for s3 storage
+	DefaultPrefix *string
+	KeyPattern    *string
+	Layer         *string
 
 	BaseDir *string
 }
@@ -100,4 +100,3 @@ type routeHandlerConfig struct {
 	storageConfig
 	Type *string
 }
-

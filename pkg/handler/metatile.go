@@ -22,7 +22,7 @@ func MetatileHandler(
 	p Parser,
 	metatileSize, tileSize, metatileMaxDetailZoom int,
 	mimeMap map[string]string,
-	storage storage.Storage,
+	stg storage.Storage,
 	bufferManager buffer.BufferManager,
 	mw metrics.MetricsWriter,
 	logger log.JsonLogger) http.Handler {
@@ -52,7 +52,6 @@ func MetatileHandler(
 		parseStart := time.Now()
 		parseResult, err := p.Parse(req)
 		reqState.Duration.Parse = time.Since(parseStart)
-		metatileData := parseResult.AdditionalData.(*MetatileParseData)
 		if err != nil {
 			var sc int
 			var response string
@@ -87,6 +86,7 @@ func MetatileHandler(
 			}
 		}
 
+		metatileData := parseResult.AdditionalData.(*MetatileParseData)
 		reqState.Coord = &metatileData.Coord
 		reqState.Format = reqState.Coord.Format
 		reqState.HttpData = parseResult.HttpData
@@ -101,7 +101,7 @@ func MetatileHandler(
 		}
 
 		storageFetchStart := time.Now()
-		storageResult, err := storage.Fetch(metaCoord, parseResult.Cond)
+		storageResult, err := stg.Fetch(metaCoord, parseResult.Cond, parseResult.BuildID)
 		reqState.Duration.StorageFetch = time.Since(storageFetchStart)
 
 		if err != nil || storageResult.NotFound {
@@ -227,6 +227,8 @@ func (mp *MetatileMuxParser) Parse(req *http.Request) (*ParseResult, error) {
 	parseResult.ContentType = contentType
 	t := &metatileData.Coord
 	t.Format = fmt
+
+	parseResult.BuildID = req.URL.Query().Get("buildid")
 
 	var coordError CoordParseError
 	z := m["z"]

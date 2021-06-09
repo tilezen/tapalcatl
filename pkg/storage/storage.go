@@ -9,8 +9,8 @@ import (
 )
 
 type Storage interface {
-	Fetch(t tile.TileCoord, c Condition) (*StorageResponse, error)
-	TileJson(f TileJsonFormat, c Condition) (*StorageResponse, error)
+	Fetch(t tile.TileCoord, c Condition, prefixOverride string) (*StorageResponse, error)
+	TileJson(f TileJsonFormat, c Condition, prefixOverride string) (*StorageResponse, error)
 	HealthCheck() error
 }
 

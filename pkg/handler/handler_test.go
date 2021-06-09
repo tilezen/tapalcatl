@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -50,7 +51,7 @@ type fakeStorage struct {
 	storage map[tile.TileCoord]*storage.StorageResponse
 }
 
-func (f *fakeStorage) Fetch(t tile.TileCoord, _ storage.Condition) (*storage.StorageResponse, error) {
+func (f *fakeStorage) Fetch(t tile.TileCoord, _ storage.Condition, prefix string) (*storage.StorageResponse, error) {
 	resp, ok := f.storage[t]
 	if ok {
 		return resp, nil
@@ -63,7 +64,7 @@ func (f *fakeStorage) HealthCheck() error {
 	return nil
 }
 
-func (f *fakeStorage) TileJson(fmt storage.TileJsonFormat, c storage.Condition) (*storage.StorageResponse, error) {
+func (f *fakeStorage) TileJson(fmt storage.TileJsonFormat, c storage.Condition, prefix string) (*storage.StorageResponse, error) {
 	return nil, nil
 }
 
@@ -104,7 +105,11 @@ func TestHandlerMiss(t *testing.T) {
 	h := MetatileHandler(parser, 1, 1, 0, mimes, storage, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &NilJsonLogger{})
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
-	req := &http.Request{}
+	req := &http.Request{
+		URL: &url.URL{
+			Path: "tile?buildid=20210331",
+		},
+	}
 	h.ServeHTTP(rw, req)
 
 	if rw.status != 404 {
@@ -143,7 +148,11 @@ func TestHandlerHit(t *testing.T) {
 	h := MetatileHandler(parser, 1, 1, 0, mimes, stg, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &NilJsonLogger{})
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
-	req := &http.Request{}
+	req := &http.Request{
+		URL: &url.URL{
+			Path: "tile?buildid=20210331",
+		},
+	}
 	h.ServeHTTP(rw, req)
 
 	if rw.status != 200 {

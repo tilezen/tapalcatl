@@ -57,7 +57,7 @@ func TestS3StorageEmpty(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
-	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
+	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{}, "actualprefix")
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
@@ -81,7 +81,7 @@ func TestS3Storage(t *testing.T) {
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
 	tile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
-	key, err := storage.objectKey(tile)
+	key, err := storage.objectKey(tile, "prefix")
 	if err != nil {
 		t.Fatalf("Unable to calculate key for tile: %s", err.Error())
 	}
@@ -89,7 +89,7 @@ func TestS3Storage(t *testing.T) {
 		t.Fatalf("Unexpected key calculation. Expected %#v, got %#v.", api.expectedKey, key)
 	}
 
-	resp, err := storage.Fetch(tile, Condition{})
+	resp, err := storage.Fetch(tile, Condition{}, "prefix")
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
@@ -160,7 +160,7 @@ func TestS3StorageNullBody(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
-	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{})
+	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{}, "actualprefix")
 	if err != nil {
 		t.Fatalf("Unable to Get tile from null body S3: %s", err.Error())
 	}

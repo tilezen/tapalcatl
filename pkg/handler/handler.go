@@ -24,6 +24,7 @@ type ParseResult struct {
 	Cond        storage.Condition
 	ContentType string
 	HttpData    state.HttpRequestData
+	BuildID     string
 	// set to be more specific data based on parse type
 	AdditionalData interface{}
 }

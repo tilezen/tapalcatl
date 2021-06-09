@@ -44,12 +44,12 @@ func respondWithPath(path string) (*StorageResponse, error) {
 	}
 }
 
-func (f *FileStorage) Fetch(t tile.TileCoord, c Condition) (*StorageResponse, error) {
+func (f *FileStorage) Fetch(t tile.TileCoord, c Condition, prefix string) (*StorageResponse, error) {
 	tilepath := filepath.Join(f.baseDir, f.layer, filepath.FromSlash(t.FileName()))
 	return respondWithPath(tilepath)
 }
 
-func (s *FileStorage) TileJson(f TileJsonFormat, c Condition) (*StorageResponse, error) {
+func (s *FileStorage) TileJson(f TileJsonFormat, c Condition, prefix string) (*StorageResponse, error) {
 	dirpath := "tilejson"
 	tileJsonExt := "json"
 	filename := fmt.Sprintf("%s.%s", f.Name(), tileJsonExt)
