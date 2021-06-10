@@ -187,6 +187,7 @@ func writeVectorTileResponse(reqState *state.RequestState, rw http.ResponseWrite
 
 func extractVectorTileFromMetatile(reqState *state.RequestState, stg storage.Storage, bufferManager buffer.BufferManager, parseResult *state.ParseResult, metatileSize, tileSize, metatileMaxDetailZoom int) (*state.VectorTileResponseData, error) {
 	responseData := &state.VectorTileResponseData{}
+	responseData.ContentType = parseResult.ContentType
 	metatileData := parseResult.AdditionalData.(*state.MetatileParseData)
 
 	// Get the offset coordinate inside the metatile where we should be able to find the vector tile
