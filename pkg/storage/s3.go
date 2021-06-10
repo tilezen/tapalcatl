@@ -1,23 +1,26 @@
 package storage
 
 import (
-	"bytes"
+	"context"
 	"crypto/md5"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"strconv"
+
+	"github.com/tilezen/tapalcatl/pkg/cache"
+	"github.com/tilezen/tapalcatl/pkg/state"
+	"github.com/tilezen/tapalcatl/pkg/tile"
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/imkira/go-interpol"
-
-	"github.com/tilezen/tapalcatl/pkg/tile"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 type S3Storage struct {
 	client          s3iface.S3API
+	tileCache       cache.Cache
 	bucket          string
 	keyPattern      string
 	tilejsonPattern string
@@ -26,9 +29,14 @@ type S3Storage struct {
 	healthcheck     string
 }
 
-func NewS3Storage(api s3iface.S3API, bucket, keyPattern, defaultPrefix, layer, healthcheck string) *S3Storage {
+func NewS3Storage(api s3iface.S3API, tileCache cache.Cache, bucket, keyPattern, defaultPrefix, layer, healthcheck string) *S3Storage {
+	if tileCache == nil {
+		tileCache = cache.NilCache
+	}
+
 	return &S3Storage{
 		client:        api,
+		tileCache:     tileCache,
 		bucket:        bucket,
 		keyPattern:    keyPattern,
 		defaultPrefix: defaultPrefix,
@@ -72,8 +80,28 @@ func (s *S3Storage) objectKey(t tile.TileCoord, prefixOverride string) (string, 
 	return interpol.WithMap(s.keyPattern, m)
 }
 
-func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, error) {
+func (s *S3Storage) respondWithKey(key string, c state.Condition) (*StorageResponse, error) {
 	var result *StorageResponse
+	ctx := context.Background()
+
+	cacheKey := fmt.Sprintf("s3://%s/%s", s.bucket, key)
+	cached, err := s.tileCache.Get(ctx, cacheKey)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching from cache: %w", err)
+	}
+
+	if cached != nil {
+		result = &StorageResponse{}
+
+		err := msgpack.Unmarshal(cached, result)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't unmarshal cached response: %w", err)
+		}
+
+		result.FetchCacheHit = true
+
+		return result, nil
+	}
 
 	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &key}
 	input.IfModifiedSince = c.IfModifiedSince
@@ -87,12 +115,14 @@ func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, e
 			switch awsErr.Code() {
 			case "NoSuchKey":
 				result = &StorageResponse{
-					NotFound: true,
+					NotFound:      true,
+					FetchCacheHit: false,
 				}
 				return result, nil
 			case "NotModified":
 				result = &StorageResponse{
-					NotModified: true,
+					NotModified:   true,
+					FetchCacheHit: false,
 				}
 				return result, nil
 			default:
@@ -105,17 +135,22 @@ func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, e
 
 	// ensure that it's safe to always close the body upstream
 	var storageSize uint64
-	var body io.ReadCloser
+	var body []byte
 	if output.Body == nil {
-		body = ioutil.NopCloser(&bytes.Buffer{})
+		body = make([]byte, 0)
 	} else {
-		body = output.Body
+		body, err = ioutil.ReadAll(output.Body)
+		if err != nil {
+			return nil, err
+		}
+
 		if output.ContentLength != nil {
 			storageSize = uint64(*output.ContentLength)
 		}
 	}
 
 	result = &StorageResponse{
+		FetchCacheHit: false,
 		Response: &SuccessfulResponse{
 			Body:         body,
 			LastModified: output.LastModified,
@@ -124,10 +159,22 @@ func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, e
 		},
 	}
 
+	if s.tileCache != cache.NilCache {
+		marshaledBytes, err := msgpack.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't marshal bytes: %w", err)
+		}
+
+		err = s.tileCache.Set(ctx, cacheKey, marshaledBytes)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't set cache: %w", err)
+		}
+	}
+
 	return result, nil
 }
 
-func (s *S3Storage) Fetch(t tile.TileCoord, c Condition, prefixOverride string) (*StorageResponse, error) {
+func (s *S3Storage) Fetch(t tile.TileCoord, c state.Condition, prefixOverride string) (*StorageResponse, error) {
 	key, err := s.objectKey(t, prefixOverride)
 	if err != nil {
 		return nil, err
@@ -145,7 +192,7 @@ func (s *S3Storage) HealthCheck() error {
 	return err
 }
 
-func (s *S3Storage) TileJson(f TileJsonFormat, c Condition, prefixOverride string) (*StorageResponse, error) {
+func (s *S3Storage) TileJson(f state.TileJsonFormat, c state.Condition, prefixOverride string) (*StorageResponse, error) {
 	filename := f.Name()
 	toHash := fmt.Sprintf("/tilejson/%s.json", filename)
 	hash := md5.Sum([]byte(toHash))

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/tilezen/tapalcatl/pkg/state"
-	"github.com/tilezen/tapalcatl/pkg/storage"
 )
 
 func ParseHttpData(req *http.Request) state.HttpRequestData {
@@ -47,8 +46,8 @@ func parseHTTPDates(date string) (*time.Time, error) {
 	return nil, err
 }
 
-func ParseCondition(req *http.Request) (storage.Condition, *CondParseError) {
-	result := storage.Condition{}
+func ParseCondition(req *http.Request) (state.Condition, *CondParseError) {
+	result := state.Condition{}
 	var err error
 	ifNoneMatch := req.Header.Get("If-None-Match")
 	if ifNoneMatch != "" {

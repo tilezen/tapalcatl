@@ -12,20 +12,44 @@ type redisCache struct {
 	client *redis.Client
 }
 
+func (m *redisCache) Get(ctx context.Context, key string) ([]byte, error) {
+	bytes, err := m.client.Get(ctx, key).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			// Redis responds with a Nil error if there was a miss.
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	return bytes, nil
+}
+
+func (m *redisCache) Set(ctx context.Context, key string, val []byte) error {
+	err := m.client.Set(ctx, key, val, 0).Err()
+	if err != nil {
+		return fmt.Errorf("error setting to redis: %w", err)
+	}
+
+	return nil
+}
+
 func (m *redisCache) GetTile(ctx context.Context, req *state.ParseResult) (*state.VectorTileResponseData, error) {
 	key := buildKey(req)
 
-	item, err := m.client.Get(ctx, key).Bytes()
-	if err == redis.Nil {
-		// Cache miss
-		return nil, nil
-	} else if err != nil {
+	item, err := m.Get(ctx, key)
+	if err != nil {
 		return nil, fmt.Errorf("error getting from redis: %w", err)
+	}
+
+	if item == nil {
+		return nil, nil
 	}
 
 	response, err := unmarshallData(item)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling from redis: %w", err)
+		return nil, err
 	}
 
 	return response, nil
@@ -39,7 +63,7 @@ func (m *redisCache) SetTile(ctx context.Context, req *state.ParseResult, resp *
 		return fmt.Errorf("error marshalling to redis: %w", err)
 	}
 
-	err = m.client.Set(ctx, key, marshalled, 0).Err()
+	err = m.Set(ctx, key, marshalled)
 	if err != nil {
 		return fmt.Errorf("error setting to redis: %w", err)
 	}

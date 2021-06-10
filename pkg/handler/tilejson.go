@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -81,8 +80,6 @@ func TileJsonHandler(p state.Parser, stg storage.Storage, mw metrics.MetricsWrit
 		}
 		storageResp := storageResult.Response
 
-		defer storageResp.Body.Close()
-
 		headers := rw.Header()
 		headers.Set("Content-Type", parseResult.ContentType)
 		headers.Set("Content-Length", fmt.Sprintf("%d", storageResp.Size))
@@ -100,7 +97,7 @@ func TileJsonHandler(p state.Parser, stg storage.Storage, mw metrics.MetricsWrit
 		rw.WriteHeader(http.StatusOK)
 		tileJsonReqState.ResponseState = state.ResponseState_Success
 		storageReadRespWriteStart := time.Now()
-		_, err = io.Copy(rw, storageResp.Body)
+		_, err = rw.Write(storageResp.Body)
 		tileJsonReqState.Duration.StorageReadRespWrite = time.Since(storageReadRespWriteStart)
 		if err != nil {
 			logger.Error(log.LogCategory_ResponseError, "Failed to write response body: %#v", err)
@@ -110,7 +107,7 @@ func TileJsonHandler(p state.Parser, stg storage.Storage, mw metrics.MetricsWrit
 }
 
 type TileJsonParseData struct {
-	Format storage.TileJsonFormat
+	Format state.TileJsonFormat
 }
 
 type TileJsonParser struct{}
@@ -123,7 +120,7 @@ func (tp *TileJsonParser) Parse(req *http.Request) (*state.ParseResult, error) {
 	}
 	m := mux.Vars(req)
 	formatName := m["fmt"]
-	tileJsonFormat := storage.NewTileJsonFormat(formatName)
+	tileJsonFormat := state.NewTileJsonFormat(formatName)
 	if tileJsonFormat == nil {
 		return parseResult, &TileJsonParseError{
 			InvalidFormat: &formatName,

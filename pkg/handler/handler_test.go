@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"testing"
@@ -52,7 +51,7 @@ type fakeStorage struct {
 	storage map[tile.TileCoord]*storage.StorageResponse
 }
 
-func (f *fakeStorage) Fetch(t tile.TileCoord, _ storage.Condition, prefix string) (*storage.StorageResponse, error) {
+func (f *fakeStorage) Fetch(t tile.TileCoord, _ state.Condition, prefix string) (*storage.StorageResponse, error) {
 	resp, ok := f.storage[t]
 	if ok {
 		return resp, nil
@@ -65,7 +64,7 @@ func (f *fakeStorage) HealthCheck() error {
 	return nil
 }
 
-func (f *fakeStorage) TileJson(fmt storage.TileJsonFormat, c storage.Condition, prefix string) (*storage.StorageResponse, error) {
+func (f *fakeStorage) TileJson(fmt state.TileJsonFormat, c state.Condition, prefix string) (*storage.StorageResponse, error) {
 	return nil, nil
 }
 
@@ -124,7 +123,7 @@ func TestHandlerHit(t *testing.T) {
 	}
 	stg.storage[metatile] = &storage.StorageResponse{
 		Response: &storage.SuccessfulResponse{
-			Body:         ioutil.NopCloser(bytes.NewReader(zipfile.Bytes())),
+			Body:         zipfile.Bytes(),
 			LastModified: &lastModified,
 			ETag:         &etag,
 		},

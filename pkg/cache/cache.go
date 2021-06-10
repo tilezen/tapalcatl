@@ -11,6 +11,8 @@ import (
 type Cache interface {
 	GetTile(ctx context.Context, req *state.ParseResult) (*state.VectorTileResponseData, error)
 	SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData) error
+	Get(ctx context.Context, key string) ([]byte, error)
+	Set(ctx context.Context, key string, val []byte) error
 }
 
 func buildKey(req *state.ParseResult) string {
@@ -52,14 +54,25 @@ func unmarshallData(data []byte) (*state.VectorTileResponseData, error) {
 	return responseData, nil
 }
 
-// NilCache implements the Cache interface with no-ops.
-type NilCache struct {
+// NilCache is the default instance of nilCache, implementing the Cache interface with no-ops.
+var NilCache = nilCache{}
+
+// nilCache implements the Cache interface with no-ops.
+type nilCache struct {
 }
 
-func (n NilCache) GetTile(ctx context.Context, req *state.ParseResult) (*state.VectorTileResponseData, error) {
+func (n nilCache) GetTile(ctx context.Context, req *state.ParseResult) (*state.VectorTileResponseData, error) {
 	return nil, nil
 }
 
-func (n NilCache) SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData) error {
+func (n nilCache) SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData) error {
+	return nil
+}
+
+func (n nilCache) Get(ctx context.Context, key string) ([]byte, error) {
+	return nil, nil
+}
+
+func (n nilCache) Set(ctx context.Context, key string, val []byte) error {
 	return nil
 }
