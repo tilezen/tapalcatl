@@ -15,7 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/bradfitz/gomemcache/memcache"
@@ -47,7 +46,6 @@ func main() {
 	var listen, healthcheck, readyCheck string
 	var poolNumEntries, poolEntrySize int
 	var metricsStatsdAddr, metricsStatsdPrefix string
-	var dynamoTableName, dynamoCacheRegion, dynamoCacheRole string
 	var memcacheHost string
 
 	hc := config.HandlerConfig{}
@@ -109,10 +107,6 @@ func main() {
 	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
 	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
 
-	f.StringVar(&dynamoTableName, "dynamo-cache-table-name", "", "Name of the DynamoDB table to be used for caching purposes")
-	f.StringVar(&dynamoCacheRegion, "dynamo-cache-region", "", "Region to use when connecting to the DynamoDB table")
-	f.StringVar(&dynamoCacheRole, "dynamo-cache-role", "", "ARN of the AWS role to use when connecting to the DynamoDB table")
-
 	f.StringVar(&memcacheHost, "memcache-host", "", "Memcache connection string for caching purposes")
 
 	err = f.Parse(os.Args[1:])
@@ -141,33 +135,7 @@ func main() {
 	}
 
 	var tileCache cache.Cache
-	if dynamoTableName != "" && dynamoCacheRegion != "" {
-		var awsSession *session.Session
-		if dynamoCacheRole == "" {
-			awsSession, err = session.NewSessionWithOptions(session.Options{
-				Config:            aws.Config{Region: aws.String(dynamoCacheRegion)},
-				SharedConfigState: session.SharedConfigEnable,
-			})
-		} else {
-			awsSession, err = session.NewSessionWithOptions(session.Options{
-				Config: aws.Config{
-					Credentials: stscreds.NewCredentials(session.Must(session.NewSession()), dynamoCacheRole),
-					Region:      aws.String(dynamoCacheRegion),
-				},
-				SharedConfigState: session.SharedConfigEnable,
-			})
-		}
-
-		if err != nil {
-			logFatalCfgErr(logger, "Unable to set up AWS session for Dynamo: %s", err.Error())
-		}
-
-		dynamoClient := dynamodb.New(awsSession)
-
-		tileCache = cache.NewDynamoDBCache(dynamoClient, dynamoTableName)
-
-		logger.Info("Configured Dynamo to use AWS role %s in %s, table %s", dynamoCacheRole, *awsSession.Config.Region, dynamoTableName)
-	} else if memcacheHost != "" {
+	if memcacheHost != "" {
 		client := memcache.New(memcacheHost)
 		tileCache = cache.NewMemcacheCache(client)
 		logger.Info("Configured Memcache to connect to %s", memcacheHost)
