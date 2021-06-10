@@ -22,7 +22,7 @@ import (
 
 const (
 	// cacheTimeout is the amount of time to wait for tile cache to do it's job before timing out.
-	cacheTimeout = 100 * time.Millisecond
+	cacheTimeout = 20 * time.Millisecond
 )
 
 func MetatileHandler(
