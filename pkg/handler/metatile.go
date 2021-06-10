@@ -158,15 +158,15 @@ func MetatileHandler(
 		}
 
 		// Cache the response
-		// TODO Do this in a goroutine so the handler can exit faster?
-		cacheSetStart := time.Now()
-		timeoutCtx, cancel = context.WithTimeout(req.Context(), cacheTimeout)
-		err = tileCache.SetTile(timeoutCtx, parseResult, responseData)
-		cancel()
-		reqState.Duration.CacheSet = time.Since(cacheSetStart)
-		if err != nil {
-			logger.Error(log.LogCategory_ResponseError, "Failed to set cache: %#v", err)
-		}
+		go func() {
+			// Using a longer timeout here so that there's a better chance the set will complete
+			timeoutCtx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
+			err = tileCache.SetTile(timeoutCtx, parseResult, responseData)
+			cancel()
+			if err != nil {
+				logger.Error(log.LogCategory_ResponseError, "Failed to set cache: %#v", err)
+			}
+		}()
 	})
 }
 
