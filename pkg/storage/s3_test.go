@@ -56,7 +56,7 @@ func TestS3StorageEmpty(t *testing.T) {
 	layer := "layer"
 	healthcheck := "healthcheck"
 
-	storage := NewS3Storage(api, nil, bucket, keyPattern, prefix, layer, healthcheck)
+	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
 	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, state.Condition{}, "actualprefix")
 	if err != nil {
@@ -79,7 +79,7 @@ func TestS3Storage(t *testing.T) {
 		healthcheck: healthcheck,
 	}
 
-	storage := NewS3Storage(api, nil, bucket, keyPattern, prefix, layer, healthcheck)
+	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
 	tile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
 	key, err := storage.objectKey(tile, "prefix")
@@ -159,7 +159,7 @@ func TestS3StorageNullBody(t *testing.T) {
 	layer := "layer"
 	healthcheck := "healthcheck"
 
-	storage := NewS3Storage(api, nil, bucket, keyPattern, prefix, layer, healthcheck)
+	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
 	_, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, state.Condition{}, "actualprefix")
 	if err != nil {
@@ -190,7 +190,7 @@ func TestS3StorageError(t *testing.T) {
 	layer := "layer"
 	healthcheck := "healthcheck"
 
-	storage := NewS3Storage(api, nil, bucket, keyPattern, prefix, layer, healthcheck)
+	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
 	// healthcheck should return error
 	err := storage.HealthCheck()

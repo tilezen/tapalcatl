@@ -271,7 +271,7 @@ func main() {
 			}
 
 			healthcheck = sd.Healthcheck
-			stg = storage.NewS3Storage(s3Client, tileCache, sd.Bucket, keyPattern, prefix, layer, healthcheck)
+			stg = storage.NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer, healthcheck)
 
 		case "file":
 			if sd.BaseDir == "" {
@@ -283,7 +283,7 @@ func main() {
 			}
 
 			healthcheck = sd.Healthcheck
-			stg = storage.NewFileStorage(sd.BaseDir, tileCache, layer, healthcheck)
+			stg = storage.NewFileStorage(sd.BaseDir, layer, healthcheck)
 
 		default:
 			logFatalCfgErr(logger, "Unknown storage type: %s", sd.Type)

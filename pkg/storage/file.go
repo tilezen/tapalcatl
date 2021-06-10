@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/tilezen/tapalcatl/pkg/cache"
 	"github.com/tilezen/tapalcatl/pkg/state"
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
@@ -17,7 +16,7 @@ type FileStorage struct {
 	healthcheck string
 }
 
-func NewFileStorage(baseDir string, tileCache cache.Cache, layer, healthcheck string) *FileStorage {
+func NewFileStorage(baseDir string, layer, healthcheck string) *FileStorage {
 	return &FileStorage{
 		baseDir:     baseDir,
 		layer:       layer,

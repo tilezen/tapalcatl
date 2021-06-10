@@ -100,18 +100,18 @@ func MetatileHandler(
 		// Check for requested vector tile in cache before doing work to extract it from metatile
 		vecCacheLookupStart := time.Now()
 		timeoutCtx, cancel := context.WithTimeout(req.Context(), cacheTimeout)
-		cached, err := tileCache.GetTile(timeoutCtx, parseResult)
+		cachedVecResp, err := tileCache.GetTile(timeoutCtx, parseResult)
 		cancel()
 		reqState.Duration.VectorCacheLookup = time.Since(vecCacheLookupStart)
 		if err != nil {
 			reqState.IsCacheLookupError = true
-			logger.Warning(log.LogCategory_ResponseError, "Error checking cache: %+v", err)
+			logger.Warning(log.LogCategory_ResponseError, "Error checking vector cache: %+v", err)
 		}
 
-		if cached != nil {
-			err := writeVectorTileResponse(reqState, rw, cached)
+		if cachedVecResp != nil {
+			err := writeVectorTileResponse(reqState, rw, cachedVecResp)
 			if err != nil {
-				logger.Error(log.LogCategory_ResponseError, "Failed to write cached response body: %#v", err)
+				logger.Error(log.LogCategory_ResponseError, "Failed to write cachedVecResp response body: %#v", err)
 				http.Error(rw, err.Error(), http.StatusInternalServerError)
 				reqState.ResponseState = state.ResponseState_Error
 				return
@@ -122,12 +122,39 @@ func MetatileHandler(
 			return
 		}
 
-		metatileResponseData, err := fetchMetatile(reqState, stg, bufferManager, parseResult, metatileSize, tileSize, metatileMaxDetailZoom)
+		// Get the offset coordinate inside the metatile where we should be able to find the vector tile
+		metaCoord, offset, err := metatileData.Coord.MetaAndOffset(metatileSize, tileSize, metatileMaxDetailZoom)
 		if err != nil {
+			logger.Warning(log.LogCategory_ConfigError, "MetaAndOffset could not be calculated: %s", err.Error())
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			reqState.ResponseState = state.ResponseState_Error
+			// Note: FetchState is left as nil, since no fetch was performed
 			return
 		}
+
+		var metatileResponseData *state.MetatileResponseData
+
+		// Check for the desired metatile in cache before taking the time to fetch it from storage
+		metaCacheLookupStart := time.Now()
+		timeoutCtx, cancel = context.WithTimeout(req.Context(), cacheTimeout)
+		metatileResponseData, err = tileCache.GetMetatile(timeoutCtx, parseResult, metaCoord)
+		cancel()
+		reqState.Duration.MetatileCacheLookup = time.Since(metaCacheLookupStart)
+		if err != nil {
+			reqState.IsCacheLookupError = true
+			logger.Warning(log.LogCategory_ResponseError, "Error checking metatile cache: %+v", err)
+		}
+
+		if metatileResponseData == nil {
+			metatileResponseData, err = fetchMetatile(reqState, stg, parseResult, metaCoord)
+			if err != nil {
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				reqState.ResponseState = state.ResponseState_Error
+				return
+			}
+		}
+
+		metatileResponseData.Offset = offset
 
 		if metatileResponseData.ResponseState == state.ResponseState_NotFound {
 			http.NotFound(rw, req)
@@ -146,7 +173,7 @@ func MetatileHandler(
 			return
 		}
 
-		// Copy some of the metatile response data over to the vector tile response data so that it is properly cached
+		// Copy some of the metatile response data over to the vector tile response data so that it is properly cachedVecResp
 		responseData.ETag = metatileResponseData.ETag
 		responseData.LastModified = metatileResponseData.LastModified
 
@@ -170,20 +197,8 @@ func MetatileHandler(
 	})
 }
 
-func fetchMetatile(reqState *state.RequestState, stg storage.Storage, bufferManager buffer.BufferManager, parseResult *state.ParseResult, metatileSize int, tileSize int, metatileMaxDetailZoom int) (*state.MetatileResponseData, error) {
-	metatileData := parseResult.AdditionalData.(*state.MetatileParseData)
+func fetchMetatile(reqState *state.RequestState, stg storage.Storage, parseResult *state.ParseResult, metaCoord tile.TileCoord) (*state.MetatileResponseData, error) {
 	responseData := &state.MetatileResponseData{}
-
-	// Get the offset coordinate inside the metatile where we should be able to find the vector tile
-	metaCoord, offset, err := metatileData.Coord.MetaAndOffset(metatileSize, tileSize, metatileMaxDetailZoom)
-	if err != nil {
-		// Note: FetchState is left as nil, since no fetch was performed
-		reqState.ResponseState = state.ResponseState_Error
-		responseData.ResponseState = state.ResponseState_Error
-		return responseData, fmt.Errorf("metaAndOffset could not be calculated: %w", err)
-	}
-
-	responseData.Offset = offset
 
 	// Fetch the metatile zip file from storage
 	storageFetchStart := time.Now()

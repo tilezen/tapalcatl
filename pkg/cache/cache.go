@@ -5,25 +5,28 @@ import (
 	"fmt"
 
 	"github.com/tilezen/tapalcatl/pkg/state"
+	"github.com/tilezen/tapalcatl/pkg/tile"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
 type Cache interface {
 	GetTile(ctx context.Context, req *state.ParseResult) (*state.VectorTileResponseData, error)
 	SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData) error
+	GetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord) (*state.MetatileResponseData, error)
+	SetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord, resp *state.MetatileResponseData) error
 	Get(ctx context.Context, key string) ([]byte, error)
 	Set(ctx context.Context, key string, val []byte) error
 }
 
-func buildKey(req *state.ParseResult) string {
-	if metatileHandlerExtra, ok := req.AdditionalData.(*state.MetatileParseData); ok {
-		buildID := "default"
-		if req.BuildID != "" {
-			buildID = req.BuildID
-		}
+func buildVectorTileKey(req *state.ParseResult) string {
+	buildID := "default"
+	if req.BuildID != "" {
+		buildID = req.BuildID
+	}
 
+	if metatileHandlerExtra, ok := req.AdditionalData.(*state.MetatileParseData); ok {
 		return fmt.Sprintf(
-			"%s-%d/%d/%d.%s",
+			"vector:%s:%d/%d/%d.%s",
 			buildID,
 			metatileHandlerExtra.Coord.Z,
 			metatileHandlerExtra.Coord.X,
@@ -34,7 +37,16 @@ func buildKey(req *state.ParseResult) string {
 	return ""
 }
 
-func marshallData(data *state.VectorTileResponseData) ([]byte, error) {
+func buildMetatileKey(req *state.ParseResult, coord tile.TileCoord) string {
+	buildID := "default"
+	if req.BuildID != "" {
+		buildID = req.BuildID
+	}
+
+	return fmt.Sprintf("metatile:%s:%d/%d/%d.%s", buildID, coord.Z, coord.X, coord.Y, coord.Format)
+}
+
+func marshallVectorTileData(data *state.VectorTileResponseData) ([]byte, error) {
 	bytes, err := msgpack.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling tile data: %w", err)
@@ -43,7 +55,7 @@ func marshallData(data *state.VectorTileResponseData) ([]byte, error) {
 	return bytes, nil
 }
 
-func unmarshallData(data []byte) (*state.VectorTileResponseData, error) {
+func unmarshallVectorTileData(data []byte) (*state.VectorTileResponseData, error) {
 	responseData := &state.VectorTileResponseData{}
 
 	err := msgpack.Unmarshal(data, responseData)
@@ -54,11 +66,39 @@ func unmarshallData(data []byte) (*state.VectorTileResponseData, error) {
 	return responseData, nil
 }
 
+func marshallMetatileData(data *state.MetatileResponseData) ([]byte, error) {
+	bytes, err := msgpack.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("error marshalling metatile data: %w", err)
+	}
+
+	return bytes, nil
+}
+
+func unmarshallMetatileData(data []byte) (*state.MetatileResponseData, error) {
+	responseData := &state.MetatileResponseData{}
+
+	err := msgpack.Unmarshal(data, responseData)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshalling metatile data: %w", err)
+	}
+
+	return responseData, nil
+}
+
 // NilCache is the default instance of nilCache, implementing the Cache interface with no-ops.
 var NilCache = nilCache{}
 
 // nilCache implements the Cache interface with no-ops.
 type nilCache struct {
+}
+
+func (n nilCache) GetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord) (*state.MetatileResponseData, error) {
+	return nil, nil
+}
+
+func (n nilCache) SetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord, resp *state.MetatileResponseData) error {
+	return nil
 }
 
 func (n nilCache) GetTile(ctx context.Context, req *state.ParseResult) (*state.VectorTileResponseData, error) {

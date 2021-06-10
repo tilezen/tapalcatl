@@ -209,14 +209,15 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	}
 
 	result["timing"] = map[string]int64{
-		"parse":         reqState.Duration.Parse.Milliseconds(),
-		"cache_lookup":  reqState.Duration.VectorCacheLookup.Milliseconds(),
-		"cache_set":     reqState.Duration.CacheSet.Milliseconds(),
-		"storage_fetch": reqState.Duration.StorageFetch.Milliseconds(),
-		"storage_read":  reqState.Duration.StorageRead.Milliseconds(),
-		"metatile_find": reqState.Duration.MetatileFind.Milliseconds(),
-		"resp_write":    reqState.Duration.RespWrite.Milliseconds(),
-		"total":         reqState.Duration.Total.Milliseconds(),
+		"parse":                 reqState.Duration.Parse.Milliseconds(),
+		"vector_cache_lookup":   reqState.Duration.VectorCacheLookup.Milliseconds(),
+		"metatile_cache_lookup": reqState.Duration.MetatileCacheLookup.Milliseconds(),
+		"cache_set":             reqState.Duration.CacheSet.Milliseconds(),
+		"storage_fetch":         reqState.Duration.StorageFetch.Milliseconds(),
+		"storage_read":          reqState.Duration.StorageRead.Milliseconds(),
+		"metatile_find":         reqState.Duration.MetatileFind.Milliseconds(),
+		"resp_write":            reqState.Duration.RespWrite.Milliseconds(),
+		"total":                 reqState.Duration.Total.Milliseconds(),
 	}
 
 	httpJsonData := make(map[string]interface{})
@@ -339,14 +340,15 @@ type ReqStorageMetadata struct {
 }
 
 type ReqDuration struct {
-	Parse             time.Duration
-	StorageFetch      time.Duration
-	VectorCacheLookup time.Duration
-	StorageRead       time.Duration
-	MetatileFind      time.Duration
-	RespWrite         time.Duration
-	Total             time.Duration
-	CacheSet          time.Duration
+	Parse               time.Duration
+	StorageFetch        time.Duration
+	VectorCacheLookup   time.Duration
+	MetatileCacheLookup time.Duration
+	StorageRead         time.Duration
+	MetatileFind        time.Duration
+	RespWrite           time.Duration
+	Total               time.Duration
+	CacheSet            time.Duration
 }
 
 // durations will be logged in milliseconds

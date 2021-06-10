@@ -1,13 +1,11 @@
 package storage
 
 import (
-	"context"
 	"crypto/md5"
 	"fmt"
 	"io/ioutil"
 	"strconv"
 
-	"github.com/tilezen/tapalcatl/pkg/cache"
 	"github.com/tilezen/tapalcatl/pkg/state"
 	"github.com/tilezen/tapalcatl/pkg/tile"
 
@@ -15,12 +13,10 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/imkira/go-interpol"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 type S3Storage struct {
 	client          s3iface.S3API
-	tileCache       cache.Cache
 	bucket          string
 	keyPattern      string
 	tilejsonPattern string
@@ -29,14 +25,9 @@ type S3Storage struct {
 	healthcheck     string
 }
 
-func NewS3Storage(api s3iface.S3API, tileCache cache.Cache, bucket, keyPattern, defaultPrefix, layer, healthcheck string) *S3Storage {
-	if tileCache == nil {
-		tileCache = cache.NilCache
-	}
-
+func NewS3Storage(api s3iface.S3API, bucket, keyPattern, defaultPrefix, layer, healthcheck string) *S3Storage {
 	return &S3Storage{
 		client:        api,
-		tileCache:     tileCache,
 		bucket:        bucket,
 		keyPattern:    keyPattern,
 		defaultPrefix: defaultPrefix,
@@ -82,26 +73,6 @@ func (s *S3Storage) objectKey(t tile.TileCoord, prefixOverride string) (string, 
 
 func (s *S3Storage) respondWithKey(key string, c state.Condition) (*StorageResponse, error) {
 	var result *StorageResponse
-	ctx := context.Background()
-
-	cacheKey := fmt.Sprintf("s3://%s/%s", s.bucket, key)
-	cached, err := s.tileCache.Get(ctx, cacheKey)
-	if err != nil {
-		return nil, fmt.Errorf("error fetching from cache: %w", err)
-	}
-
-	if cached != nil {
-		result = &StorageResponse{}
-
-		err := msgpack.Unmarshal(cached, result)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't unmarshal cached response: %w", err)
-		}
-
-		result.FetchCacheHit = true
-
-		return result, nil
-	}
 
 	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &key}
 	input.IfModifiedSince = c.IfModifiedSince
@@ -157,18 +128,6 @@ func (s *S3Storage) respondWithKey(key string, c state.Condition) (*StorageRespo
 			ETag:         output.ETag,
 			Size:         storageSize,
 		},
-	}
-
-	if s.tileCache != cache.NilCache {
-		marshaledBytes, err := msgpack.Marshal(result)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't marshal bytes: %w", err)
-		}
-
-		err = s.tileCache.Set(ctx, cacheKey, marshaledBytes)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't set cache: %w", err)
-		}
 	}
 
 	return result, nil
