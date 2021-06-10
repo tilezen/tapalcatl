@@ -97,10 +97,6 @@ func MetatileHandler(
 		reqState.Format = reqState.Coord.Format
 		reqState.HttpData = parseResult.HttpData
 
-		if tileCache == nil {
-			tileCache = cache.NilCache
-		}
-
 		// Check for requested vector tile in cache before doing work to extract it from metatile
 		vecCacheLookupStart := time.Now()
 		timeoutCtx, cancel := context.WithTimeout(req.Context(), cacheTimeout)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tilezen/tapalcatl/pkg/buffer"
+	"github.com/tilezen/tapalcatl/pkg/cache"
 	"github.com/tilezen/tapalcatl/pkg/log"
 	"github.com/tilezen/tapalcatl/pkg/metrics"
 	"github.com/tilezen/tapalcatl/pkg/state"
@@ -89,7 +90,7 @@ func TestHandlerMiss(t *testing.T) {
 	theTile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: theTile}
 	storage := &fakeStorage{storage: make(map[tile.TileCoord]*storage.StorageResponse)}
-	h := MetatileHandler(parser, 1, 1, 0, storage, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &log.NilJsonLogger{}, nil)
+	h := MetatileHandler(parser, 1, 1, 0, storage, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &log.NilJsonLogger{}, cache.NilCache)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{
@@ -129,7 +130,7 @@ func TestHandlerHit(t *testing.T) {
 		},
 	}
 
-	h := MetatileHandler(parser, 1, 1, 0, stg, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &log.NilJsonLogger{}, nil)
+	h := MetatileHandler(parser, 1, 1, 0, stg, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &log.NilJsonLogger{}, cache.NilCache)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{
