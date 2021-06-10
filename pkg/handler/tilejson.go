@@ -14,7 +14,7 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/storage"
 )
 
-func TileJsonHandler(p Parser, stg storage.Storage, mw metrics.MetricsWriter, logger log.JsonLogger) http.Handler {
+func TileJsonHandler(p state.Parser, stg storage.Storage, mw metrics.MetricsWriter, logger log.JsonLogger) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		tileJsonReqState := state.TileJsonRequestState{}
 
@@ -115,9 +115,9 @@ type TileJsonParseData struct {
 
 type TileJsonParser struct{}
 
-func (tp *TileJsonParser) Parse(req *http.Request) (*ParseResult, error) {
-	parseResult := &ParseResult{
-		Type:        ParseResultType_Tilejson,
+func (tp *TileJsonParser) Parse(req *http.Request) (*state.ParseResult, error) {
+	parseResult := &state.ParseResult{
+		Type:        state.ParseResultType_Tilejson,
 		ContentType: "application/json",
 		HttpData:    ParseHttpData(req),
 	}

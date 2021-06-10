@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
@@ -46,7 +47,8 @@ func main() {
 	var listen, healthcheck, readyCheck string
 	var poolNumEntries, poolEntrySize int
 	var metricsStatsdAddr, metricsStatsdPrefix string
-	var dynamoCacheTableARN, dynamoCacheRegion, dynamoCacheRole string
+	var dynamoTableName, dynamoCacheRegion, dynamoCacheRole string
+	var memcacheHost string
 
 	hc := config.HandlerConfig{}
 
@@ -107,9 +109,11 @@ func main() {
 	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
 	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
 
-	f.StringVar(&dynamoCacheTableARN, "dynamo-cache-table-arn", "", "ARN of the DynamoDB table to use for caching purposes")
+	f.StringVar(&dynamoTableName, "dynamo-cache-table-name", "", "Name of the DynamoDB table to be used for caching purposes")
 	f.StringVar(&dynamoCacheRegion, "dynamo-cache-region", "", "Region to use when connecting to the DynamoDB table")
-	f.StringVar(&dynamoCacheRegion, "dynamo-cache-role", "", "ARN of the Role to use when connecting to the DynamoDB table")
+	f.StringVar(&dynamoCacheRole, "dynamo-cache-role", "", "ARN of the AWS role to use when connecting to the DynamoDB table")
+
+	f.StringVar(&memcacheHost, "memcache-host", "", "Memcache connection string for caching purposes")
 
 	err = f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
@@ -137,15 +141,22 @@ func main() {
 	}
 
 	var tileCache cache.Cache
-	if dynamoCacheTableARN != "" && dynamoCacheRegion != "" && dynamoCacheRole != "" {
-		logger.Info("Configured Dynamo to use AWS role %s", dynamoCacheRole)
-		awsSession, err := session.NewSessionWithOptions(session.Options{
-			Config: aws.Config{
-				Credentials: stscreds.NewCredentials(session.Must(session.NewSession()), dynamoCacheRole),
-				Region:      hc.Aws.Region,
-			},
-			SharedConfigState: session.SharedConfigEnable,
-		})
+	if dynamoTableName != "" && dynamoCacheRegion != "" {
+		var awsSession *session.Session
+		if dynamoCacheRole == "" {
+			awsSession, err = session.NewSessionWithOptions(session.Options{
+				Config:            aws.Config{Region: aws.String(dynamoCacheRegion)},
+				SharedConfigState: session.SharedConfigEnable,
+			})
+		} else {
+			awsSession, err = session.NewSessionWithOptions(session.Options{
+				Config: aws.Config{
+					Credentials: stscreds.NewCredentials(session.Must(session.NewSession()), dynamoCacheRole),
+					Region:      aws.String(dynamoCacheRegion),
+				},
+				SharedConfigState: session.SharedConfigEnable,
+			})
+		}
 
 		if err != nil {
 			logFatalCfgErr(logger, "Unable to set up AWS session for Dynamo: %s", err.Error())
@@ -153,7 +164,13 @@ func main() {
 
 		dynamoClient := dynamodb.New(awsSession)
 
-		tileCache = cache.NewDynamoDBCache(dynamoClient, dynamoCacheTableARN)
+		tileCache = cache.NewDynamoDBCache(dynamoClient, dynamoTableName)
+
+		logger.Info("Configured Dynamo to use AWS role %s in %s, table %s", dynamoCacheRole, *awsSession.Config.Region, dynamoTableName)
+	} else if memcacheHost != "" {
+		client := memcache.New(memcacheHost)
+		tileCache = cache.NewMemcacheCache(client)
+		logger.Info("Configured Memcache to connect to %s", memcacheHost)
 	} else {
 		tileCache = &cache.NilCache{}
 	}
@@ -237,10 +254,13 @@ func main() {
 			if awsSession == nil {
 				if hc.Aws != nil && hc.Aws.Region != nil {
 					awsSession, err = session.NewSessionWithOptions(session.Options{
-						Config: aws.Config{Region: hc.Aws.Region},
+						Config:            aws.Config{Region: hc.Aws.Region},
+						SharedConfigState: session.SharedConfigEnable,
 					})
 				} else {
-					awsSession, err = session.NewSession()
+					awsSession, err = session.NewSessionWithOptions(session.Options{
+						SharedConfigState: session.SharedConfigEnable,
+					})
 				}
 			}
 			if err != nil {

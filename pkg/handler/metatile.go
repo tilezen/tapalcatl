@@ -20,7 +20,7 @@ import (
 )
 
 func MetatileHandler(
-	p Parser,
+	p state.Parser,
 	metatileSize, tileSize, metatileMaxDetailZoom int,
 	stg storage.Storage,
 	bufferManager buffer.BufferManager,
@@ -29,7 +29,7 @@ func MetatileHandler(
 	tileCache cache.Cache) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		reqState := state.RequestState{}
+		reqState := &state.RequestState{}
 
 		startTime := time.Now()
 
@@ -38,14 +38,14 @@ func MetatileHandler(
 			reqState.Duration.Total = totalDuration
 
 			if reqState.ResponseState == state.ResponseState_Nil {
-				logger.Error(log.LogCategory_InvalidCodeState, "handler did not set response state")
+				logger.Error(log.LogCategory_InvalidCodeState, "handler did not set response state for tile %+v", reqState.Coord)
 			}
 
 			jsonReqData := reqState.AsJsonMap()
 			logger.Metrics(jsonReqData)
 
 			// write out metrics
-			mw.WriteMetatileState(&reqState)
+			mw.WriteMetatileState(reqState)
 
 		}()
 
@@ -86,7 +86,7 @@ func MetatileHandler(
 			}
 		}
 
-		metatileData := parseResult.AdditionalData.(*MetatileParseData)
+		metatileData := parseResult.AdditionalData.(*state.MetatileParseData)
 		reqState.Coord = &metatileData.Coord
 		reqState.Format = reqState.Coord.Format
 		reqState.HttpData = parseResult.HttpData
@@ -112,7 +112,8 @@ func MetatileHandler(
 				return
 			}
 
-			// TODO Log cached success
+			reqState.Cache.VectorCacheHit = true
+			reqState.ResponseState = state.ResponseState_Success
 			return
 		}
 
@@ -125,9 +126,11 @@ func MetatileHandler(
 
 		if responseData.ResponseState == state.ResponseState_NotFound {
 			http.NotFound(rw, req)
+			reqState.ResponseState = state.ResponseState_NotFound
 			return
 		} else if responseData.ResponseState == state.ResponseState_NotModified {
 			rw.WriteHeader(http.StatusNotModified)
+			reqState.ResponseState = state.ResponseState_NotModified
 			return
 		}
 
@@ -140,19 +143,16 @@ func MetatileHandler(
 
 		// Cache the response
 		// TODO Do this in a goroutine so the handler can exit faster?
-		tileCache.SetTile(parseResult, responseData)
+		cacheSetStart := time.Now()
+		err = tileCache.SetTile(parseResult, responseData)
+		reqState.Duration.CacheSet = time.Since(cacheSetStart)
+		if err != nil {
+			logger.Error(log.LogCategory_ResponseError, "Failed to set cache: %#v", err)
+		}
 	})
 }
 
-type VectorTileResponseData struct {
-	ContentType   string
-	LastModified  *time.Time
-	ETag          *string
-	ResponseState state.ReqResponseState
-	Data          []byte
-}
-
-func writeVectorTileResponse(reqState state.RequestState, rw http.ResponseWriter, data *VectorTileResponseData) error {
+func writeVectorTileResponse(reqState *state.RequestState, rw http.ResponseWriter, data *state.VectorTileResponseData) error {
 	headers := rw.Header()
 
 	headers.Set("Content-Type", data.ContentType)
@@ -185,9 +185,9 @@ func writeVectorTileResponse(reqState state.RequestState, rw http.ResponseWriter
 	return nil
 }
 
-func extractVectorTileFromMetatile(reqState state.RequestState, stg storage.Storage, bufferManager buffer.BufferManager, parseResult *ParseResult, metatileSize, tileSize, metatileMaxDetailZoom int) (*VectorTileResponseData, error) {
-	responseData := &VectorTileResponseData{}
-	metatileData := parseResult.AdditionalData.(*MetatileParseData)
+func extractVectorTileFromMetatile(reqState *state.RequestState, stg storage.Storage, bufferManager buffer.BufferManager, parseResult *state.ParseResult, metatileSize, tileSize, metatileMaxDetailZoom int) (*state.VectorTileResponseData, error) {
+	responseData := &state.VectorTileResponseData{}
+	metatileData := parseResult.AdditionalData.(*state.MetatileParseData)
 
 	// Get the offset coordinate inside the metatile where we should be able to find the vector tile
 	metaCoord, offset, err := metatileData.Coord.MetaAndOffset(metatileSize, tileSize, metatileMaxDetailZoom)
@@ -200,7 +200,7 @@ func extractVectorTileFromMetatile(reqState state.RequestState, stg storage.Stor
 
 	// Fetch the metatile zip file from storage
 	storageFetchStart := time.Now()
-	storageResult, err := stg.Fetch(metaCoord, parseResult.Cond, metatileData.BuildID)
+	storageResult, err := stg.Fetch(metaCoord, parseResult.Cond, parseResult.BuildID)
 	reqState.Duration.StorageFetch = time.Since(storageFetchStart)
 
 	if err != nil || storageResult.NotFound {
@@ -303,18 +303,18 @@ type MetatileMuxParser struct {
 	MimeMap map[string]string
 }
 
-func (mp *MetatileMuxParser) Parse(req *http.Request) (*ParseResult, error) {
+func (mp *MetatileMuxParser) Parse(req *http.Request) (*state.ParseResult, error) {
 	m := mux.Vars(req)
 
 	var contentType string
 	var err error
 	var ok bool
 
-	parseResult := &ParseResult{
-		Type:     ParseResultType_Metatile,
+	parseResult := &state.ParseResult{
+		Type:     state.ParseResultType_Metatile,
 		HttpData: ParseHttpData(req),
 	}
-	metatileData := &MetatileParseData{}
+	metatileData := &state.MetatileParseData{}
 	parseResult.AdditionalData = metatileData
 
 	fmt := m["fmt"]
@@ -362,9 +362,4 @@ func (mp *MetatileMuxParser) Parse(req *http.Request) (*ParseResult, error) {
 	}
 
 	return parseResult, nil
-}
-
-type MetatileParseData struct {
-	Coord   tile.TileCoord
-	BuildID string
 }

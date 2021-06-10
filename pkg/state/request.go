@@ -1,6 +1,7 @@
 package state
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/tilezen/tapalcatl/pkg/storage"
@@ -95,11 +96,50 @@ type HttpRequestData struct {
 	Referrer  string
 }
 
+type ReqCacheData struct {
+	VectorCacheHit bool
+}
+
+type ParseResultType int
+
+const (
+	ParseResultType_Nil ParseResultType = iota
+	ParseResultType_Metatile
+	ParseResultType_Tilejson
+)
+
+type Parser interface {
+	Parse(*http.Request) (*ParseResult, error)
+}
+
+type ParseResult struct {
+	Type        ParseResultType
+	Cond        storage.Condition
+	ContentType string
+	HttpData    HttpRequestData
+	BuildID     string
+	// set to be more specific data based on parse type
+	AdditionalData interface{}
+}
+
+type VectorTileResponseData struct {
+	ContentType   string
+	LastModified  *time.Time
+	ETag          *string
+	ResponseState ReqResponseState
+	Data          []byte
+}
+
+type MetatileParseData struct {
+	Coord tile.TileCoord
+}
+
 type RequestState struct {
 	ResponseState        ReqResponseState
 	FetchState           ReqFetchState
 	FetchSize            ReqFetchSize
 	StorageMetadata      ReqStorageMetadata
+	Cache                ReqCacheData
 	IsZipError           bool
 	IsResponseWriteError bool
 	IsCondError          bool
@@ -156,6 +196,7 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	result["timing"] = map[string]int64{
 		"parse":         reqState.Duration.Parse.Milliseconds(),
 		"cache_lookup":  reqState.Duration.CacheLookup.Milliseconds(),
+		"cache_set":     reqState.Duration.CacheSet.Milliseconds(),
 		"storage_fetch": reqState.Duration.StorageFetch.Milliseconds(),
 		"storage_read":  reqState.Duration.StorageRead.Milliseconds(),
 		"metatile_find": reqState.Duration.MetatileFind.Milliseconds(),
@@ -191,6 +232,10 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	}
 	httpJsonData["status"] = reqState.ResponseState.AsStatusCode()
 	result["http"] = httpJsonData
+
+	cacheJsonData := make(map[string]interface{})
+	cacheJsonData["vector_hit"] = reqState.Cache.VectorCacheHit
+	result["cache"] = cacheJsonData
 
 	return result
 }
@@ -278,7 +323,14 @@ type ReqStorageMetadata struct {
 }
 
 type ReqDuration struct {
-	Parse, StorageFetch, CacheLookup, StorageRead, MetatileFind, RespWrite, Total time.Duration
+	Parse        time.Duration
+	StorageFetch time.Duration
+	CacheLookup  time.Duration
+	StorageRead  time.Duration
+	MetatileFind time.Duration
+	RespWrite    time.Duration
+	Total        time.Duration
+	CacheSet     time.Duration
 }
 
 // durations will be logged in milliseconds
