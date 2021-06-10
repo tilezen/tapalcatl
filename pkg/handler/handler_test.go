@@ -13,6 +13,7 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/buffer"
 	"github.com/tilezen/tapalcatl/pkg/log"
 	"github.com/tilezen/tapalcatl/pkg/metrics"
+	"github.com/tilezen/tapalcatl/pkg/state"
 	"github.com/tilezen/tapalcatl/pkg/storage"
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
@@ -39,9 +40,9 @@ type fakeParser struct {
 	tile tile.TileCoord
 }
 
-func (f *fakeParser) Parse(_ *http.Request) (*ParseResult, error) {
-	result := &ParseResult{
-		AdditionalData: &MetatileParseData{Coord: f.tile},
+func (f *fakeParser) Parse(_ *http.Request) (*state.ParseResult, error) {
+	result := &state.ParseResult{
+		AdditionalData: &state.MetatileParseData{Coord: f.tile},
 		ContentType:    "application/json",
 	}
 	return result, nil
