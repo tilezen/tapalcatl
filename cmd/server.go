@@ -292,7 +292,7 @@ func main() {
 			}
 
 			healthcheck = sd.Healthcheck
-			stg = storage.NewS3Storage(s3Client, logger, sd.Bucket, keyPattern, prefix, layer, healthcheck)
+			stg = storage.NewS3Storage(s3Client, sd.Bucket, keyPattern, prefix, layer, healthcheck)
 
 		case "file":
 			if sd.BaseDir == "" {

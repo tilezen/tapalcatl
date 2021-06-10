@@ -13,13 +13,11 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/imkira/go-interpol"
 
-	"github.com/tilezen/tapalcatl/pkg/log"
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
 
 type S3Storage struct {
 	client          s3iface.S3API
-	logger          log.JsonLogger
 	bucket          string
 	keyPattern      string
 	tilejsonPattern string
@@ -28,10 +26,9 @@ type S3Storage struct {
 	healthcheck     string
 }
 
-func NewS3Storage(api s3iface.S3API, logger log.JsonLogger, bucket, keyPattern, defaultPrefix, layer, healthcheck string) *S3Storage {
+func NewS3Storage(api s3iface.S3API, bucket, keyPattern, defaultPrefix, layer, healthcheck string) *S3Storage {
 	return &S3Storage{
 		client:        api,
-		logger:        logger,
 		bucket:        bucket,
 		keyPattern:    keyPattern,
 		defaultPrefix: defaultPrefix,
@@ -78,7 +75,6 @@ func (s *S3Storage) objectKey(t tile.TileCoord, prefixOverride string) (string, 
 func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, error) {
 	var result *StorageResponse
 
-	s.logger.Info("Requesting s3://%s/%s", s.bucket, key)
 	input := &s3.GetObjectInput{Bucket: &s.bucket, Key: &key}
 	input.IfModifiedSince = c.IfModifiedSince
 	input.IfNoneMatch = c.IfNoneMatch
@@ -87,9 +83,6 @@ func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, e
 	// check if we are an error, 304, or 404
 	if err != nil {
 		if awsErr, ok := err.(awserr.Error); ok {
-
-			s.logger.Info("Error fetching metatile %s: %s", key, awsErr.Message())
-
 			// NOTE: the way to distinguish seems to be string matching on the code ...
 			switch awsErr.Code() {
 			case "NoSuchKey":
@@ -106,6 +99,8 @@ func (s *S3Storage) respondWithKey(key string, c Condition) (*StorageResponse, e
 				return nil, err
 			}
 		}
+
+		return nil, err
 	}
 
 	// ensure that it's safe to always close the body upstream
