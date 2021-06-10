@@ -137,7 +137,7 @@ func main() {
 	var tileCache cache.Cache
 	if redisAddr != "" {
 		client := redis.NewClient(&redis.Options{
-			Addr: "localhost:6379",
+			Addr: redisAddr,
 		})
 		tileCache = cache.NewRedisCache(client)
 		logger.Info("Configured Redis to connect to %s", redisAddr)
