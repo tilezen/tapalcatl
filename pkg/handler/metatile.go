@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,11 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/state"
 	"github.com/tilezen/tapalcatl/pkg/storage"
 	"github.com/tilezen/tapalcatl/pkg/tile"
+)
+
+const (
+	// cacheTimeout is the amount of time to wait for tile cache to do it's job before timing out.
+	cacheTimeout = 100 * time.Millisecond
 )
 
 func MetatileHandler(
@@ -96,7 +102,9 @@ func MetatileHandler(
 		}
 
 		cacheLookupStart := time.Now()
-		cached, err := tileCache.GetTile(parseResult)
+		timeoutCtx, cancel := context.WithTimeout(req.Context(), cacheTimeout)
+		cached, err := tileCache.GetTile(timeoutCtx, parseResult)
+		cancel()
 		reqState.Duration.CacheLookup = time.Since(cacheLookupStart)
 		if err != nil {
 			reqState.IsCacheLookupError = true
@@ -144,7 +152,9 @@ func MetatileHandler(
 		// Cache the response
 		// TODO Do this in a goroutine so the handler can exit faster?
 		cacheSetStart := time.Now()
-		err = tileCache.SetTile(parseResult, responseData)
+		timeoutCtx, cancel = context.WithTimeout(req.Context(), cacheTimeout)
+		err = tileCache.SetTile(timeoutCtx, parseResult, responseData)
+		cancel()
 		reqState.Duration.CacheSet = time.Since(cacheSetStart)
 		if err != nil {
 			logger.Error(log.LogCategory_ResponseError, "Failed to set cache: %#v", err)

@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	"github.com/bradfitz/gomemcache/memcache"
+	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
@@ -46,7 +46,7 @@ func main() {
 	var listen, healthcheck, readyCheck string
 	var poolNumEntries, poolEntrySize int
 	var metricsStatsdAddr, metricsStatsdPrefix string
-	var memcacheHost string
+	var redisAddr string
 
 	hc := config.HandlerConfig{}
 
@@ -107,7 +107,7 @@ func main() {
 	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
 	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
 
-	f.StringVar(&memcacheHost, "memcache-host", "", "Memcache connection string for caching purposes")
+	f.StringVar(&redisAddr, "redis-addr", "", "Redis connection address for caching purposes")
 
 	err = f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
@@ -135,10 +135,12 @@ func main() {
 	}
 
 	var tileCache cache.Cache
-	if memcacheHost != "" {
-		client := memcache.New(memcacheHost)
-		tileCache = cache.NewMemcacheCache(client)
-		logger.Info("Configured Memcache to connect to %s", memcacheHost)
+	if redisAddr != "" {
+		client := redis.NewClient(&redis.Options{
+			Addr: "localhost:6379",
+		})
+		tileCache = cache.NewRedisCache(client)
+		logger.Info("Configured Redis to connect to %s", redisAddr)
 	} else {
 		tileCache = &cache.NilCache{}
 	}

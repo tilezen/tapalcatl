@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -12,7 +13,7 @@ type memcacheClient struct {
 	client *memcache.Client
 }
 
-func (m *memcacheClient) GetTile(req *state.ParseResult) (*state.VectorTileResponseData, error) {
+func (m *memcacheClient) GetTile(ctx context.Context, req *state.ParseResult) (*state.VectorTileResponseData, error) {
 	key := buildKey(req)
 
 	item, err := m.client.Get(key)
@@ -33,7 +34,7 @@ func (m *memcacheClient) GetTile(req *state.ParseResult) (*state.VectorTileRespo
 	return &response, nil
 }
 
-func (m *memcacheClient) SetTile(req *state.ParseResult, resp *state.VectorTileResponseData) error {
+func (m *memcacheClient) SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData) error {
 	key := buildKey(req)
 
 	marshalled, err := json.Marshal(resp)
