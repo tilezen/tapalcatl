@@ -139,8 +139,17 @@ func main() {
 		client := redis.NewClient(&redis.Options{
 			Addr: redisAddr,
 		})
+
+		// Ping Redis to make sure it's available before starting.
+		// Using a longer timeout to give time for network connections to spin up, etc.
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		cancel()
+		if err := client.Ping(timeoutCtx).Err(); err != nil {
+			logFatalCfgErr(logger, "Couldn't reach Redis service at %s: %s", redisAddr, err.Error())
+		}
+
+		logger.Info("Redis connected to %s", redisAddr)
 		tileCache = cache.NewRedisCache(client)
-		logger.Info("Configured Redis to connect to %s", redisAddr)
 	} else {
 		tileCache = cache.NilCache
 	}
