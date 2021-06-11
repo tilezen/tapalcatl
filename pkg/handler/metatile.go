@@ -27,9 +27,9 @@ const (
 	// This is higher because we do this in a goroutine off the thread processing the response.
 	cacheSetTimeout = 1 * time.Second
 	// cacheMetatileTTL is the amount of time the cache should store metatiles before forcing a refresh
-	cacheMetatileTTL = 24 * time.Hour
+	cacheMetatileTTL = 168 * time.Hour
 	// cacheVectorTileTTL is the amount of time the cache should store vector tiles before forcing a refresh
-	cacheVectorTileTTL = 24 * time.Hour
+	cacheVectorTileTTL = 168 * time.Hour
 )
 
 func MetatileHandler(
