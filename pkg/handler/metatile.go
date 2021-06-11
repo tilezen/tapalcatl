@@ -23,6 +23,9 @@ import (
 const (
 	// cacheTimeout is the amount of time to wait for tile cache to do it's job before timing out.
 	cacheTimeout = 20 * time.Millisecond
+	// cacheSetTimeout is the amount of time to wait for the cache when we're setting values.
+	// This is higher because we do this in a goroutine off the thread processing the response.
+	cacheSetTimeout = 1 * time.Second
 )
 
 func MetatileHandler(
@@ -187,7 +190,7 @@ func MetatileHandler(
 		// Cache the response
 		go func() {
 			// Using a longer timeout here so that there's a better chance the set will complete
-			timeoutCtx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
+			timeoutCtx, cancel = context.WithTimeout(context.Background(), cacheSetTimeout)
 			err = tileCache.SetTile(timeoutCtx, parseResult, responseData)
 			cancel()
 			if err != nil {

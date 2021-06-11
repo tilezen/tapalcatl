@@ -143,7 +143,7 @@ func main() {
 		// Ping Redis to make sure it's available before starting.
 		// Using a longer timeout to give time for network connections to spin up, etc.
 		timeoutCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		cancel()
+		defer cancel()
 		if err := client.Ping(timeoutCtx).Err(); err != nil {
 			logFatalCfgErr(logger, "Couldn't reach Redis service at %s: %s", redisAddr, err.Error())
 		}
