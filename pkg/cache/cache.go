@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tilezen/tapalcatl/pkg/state"
 	"github.com/tilezen/tapalcatl/pkg/tile"
@@ -11,11 +12,11 @@ import (
 
 type Cache interface {
 	GetTile(ctx context.Context, req *state.ParseResult) (*state.VectorTileResponseData, error)
-	SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData) error
+	SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData, ttl time.Duration) error
 	GetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord) (*state.MetatileResponseData, error)
-	SetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord, resp *state.MetatileResponseData) error
+	SetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord, resp *state.MetatileResponseData, ttl time.Duration) error
 	Get(ctx context.Context, key string) ([]byte, error)
-	Set(ctx context.Context, key string, val []byte) error
+	Set(ctx context.Context, key string, val []byte, ttl time.Duration) error
 }
 
 func buildVectorTileKey(req *state.ParseResult) string {
@@ -97,7 +98,7 @@ func (n nilCache) GetMetatile(ctx context.Context, req *state.ParseResult, metaC
 	return nil, nil
 }
 
-func (n nilCache) SetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord, resp *state.MetatileResponseData) error {
+func (n nilCache) SetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord, resp *state.MetatileResponseData, ttl time.Duration) error {
 	return nil
 }
 
@@ -105,7 +106,7 @@ func (n nilCache) GetTile(ctx context.Context, req *state.ParseResult) (*state.V
 	return nil, nil
 }
 
-func (n nilCache) SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData) error {
+func (n nilCache) SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData, ttl time.Duration) error {
 	return nil
 }
 
@@ -113,6 +114,6 @@ func (n nilCache) Get(ctx context.Context, key string) ([]byte, error) {
 	return nil, nil
 }
 
-func (n nilCache) Set(ctx context.Context, key string, val []byte) error {
+func (n nilCache) Set(ctx context.Context, key string, val []byte, ttl time.Duration) error {
 	return nil
 }

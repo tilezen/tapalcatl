@@ -26,6 +26,10 @@ const (
 	// cacheSetTimeout is the amount of time to wait for the cache when we're setting values.
 	// This is higher because we do this in a goroutine off the thread processing the response.
 	cacheSetTimeout = 1 * time.Second
+	// cacheMetatileTTL is the amount of time the cache should store metatiles before forcing a refresh
+	cacheMetatileTTL = 24 * time.Hour
+	// cacheVectorTileTTL is the amount of time the cache should store vector tiles before forcing a refresh
+	cacheVectorTileTTL = 24 * time.Hour
 )
 
 func MetatileHandler(
@@ -159,7 +163,7 @@ func MetatileHandler(
 			// Set the metatile cache on a goroutine so we don't hold up the rest of the request
 			go func() {
 				timeoutCtx, cancel := context.WithTimeout(context.Background(), cacheSetTimeout)
-				err = tileCache.SetMetatile(timeoutCtx, parseResult, metaCoord, metatileResponseData)
+				err = tileCache.SetMetatile(timeoutCtx, parseResult, metaCoord, metatileResponseData, cacheMetatileTTL)
 				cancel()
 				if err != nil {
 					logger.Warning(log.LogCategory_ResponseError, "Failed to set metatile cache: %+v", err)
@@ -203,7 +207,7 @@ func MetatileHandler(
 		go func() {
 			// Using a longer timeout here so that there's a better chance the set will complete
 			timeoutCtx, cancel = context.WithTimeout(context.Background(), cacheSetTimeout)
-			err = tileCache.SetTile(timeoutCtx, parseResult, responseData)
+			err = tileCache.SetTile(timeoutCtx, parseResult, responseData, cacheVectorTileTTL)
 			cancel()
 			if err != nil {
 				logger.Error(log.LogCategory_ResponseError, "Failed to set cache: %#v", err)

@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/tilezen/tapalcatl/pkg/state"
@@ -27,8 +28,8 @@ func (m *redisCache) Get(ctx context.Context, key string) ([]byte, error) {
 	return bytes, nil
 }
 
-func (m *redisCache) Set(ctx context.Context, key string, val []byte) error {
-	err := m.client.Set(ctx, key, val, 0).Err()
+func (m *redisCache) Set(ctx context.Context, key string, val []byte, ttl time.Duration) error {
+	err := m.client.Set(ctx, key, val, ttl).Err()
 	if err != nil {
 		return fmt.Errorf("error setting to redis: %w", err)
 	}
@@ -56,7 +57,7 @@ func (m *redisCache) GetTile(ctx context.Context, req *state.ParseResult) (*stat
 	return response, nil
 }
 
-func (m *redisCache) SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData) error {
+func (m *redisCache) SetTile(ctx context.Context, req *state.ParseResult, resp *state.VectorTileResponseData, ttl time.Duration) error {
 	key := buildVectorTileKey(req)
 
 	marshalled, err := marshallVectorTileData(resp)
@@ -64,7 +65,7 @@ func (m *redisCache) SetTile(ctx context.Context, req *state.ParseResult, resp *
 		return fmt.Errorf("error marshalling to redis: %w", err)
 	}
 
-	err = m.Set(ctx, key, marshalled)
+	err = m.Set(ctx, key, marshalled, ttl)
 	if err != nil {
 		return fmt.Errorf("error setting to redis: %w", err)
 	}
@@ -92,7 +93,7 @@ func (m *redisCache) GetMetatile(ctx context.Context, req *state.ParseResult, me
 	return response, nil
 }
 
-func (m *redisCache) SetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord, resp *state.MetatileResponseData) error {
+func (m *redisCache) SetMetatile(ctx context.Context, req *state.ParseResult, metaCoord tile.TileCoord, resp *state.MetatileResponseData, ttl time.Duration) error {
 	key := buildMetatileKey(req, metaCoord)
 
 	marshalled, err := marshallMetatileData(resp)
@@ -100,7 +101,7 @@ func (m *redisCache) SetMetatile(ctx context.Context, req *state.ParseResult, me
 		return fmt.Errorf("error marshalling to redis: %w", err)
 	}
 
-	err = m.Set(ctx, key, marshalled)
+	err = m.Set(ctx, key, marshalled, ttl)
 	if err != nil {
 		return fmt.Errorf("error setting to redis: %w", err)
 	}
