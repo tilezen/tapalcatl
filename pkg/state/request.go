@@ -1,9 +1,10 @@
 package state
 
 import (
+	"fmt"
+	"net/http"
 	"time"
 
-	"github.com/tilezen/tapalcatl/pkg/storage"
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
 
@@ -95,14 +96,69 @@ type HttpRequestData struct {
 	Referrer  string
 }
 
+type ReqCacheData struct {
+	VectorCacheHit   bool
+	MetatileCacheHit bool
+}
+
+type ParseResultType int
+
+const (
+	ParseResultType_Nil ParseResultType = iota
+	ParseResultType_Metatile
+	ParseResultType_Tilejson
+)
+
+type Parser interface {
+	Parse(*http.Request) (*ParseResult, error)
+}
+
+type ParseResult struct {
+	Type        ParseResultType
+	Cond        Condition
+	ContentType string
+	HttpData    HttpRequestData
+	BuildID     string
+	// set to be more specific data based on parse type
+	AdditionalData interface{}
+}
+
+type VectorTileResponseData struct {
+	ContentType   string
+	LastModified  *time.Time
+	ETag          *string
+	ResponseState ReqResponseState
+	Data          []byte
+}
+
+type MetatileResponseData struct {
+	LastModified  *time.Time
+	ETag          *string
+	ResponseState ReqResponseState
+	Data          []byte
+	Offset        tile.TileCoord
+	BodySize      int64
+}
+
+type Condition struct {
+	IfModifiedSince *time.Time
+	IfNoneMatch     *string
+}
+
+type MetatileParseData struct {
+	Coord tile.TileCoord
+}
+
 type RequestState struct {
 	ResponseState        ReqResponseState
 	FetchState           ReqFetchState
 	FetchSize            ReqFetchSize
 	StorageMetadata      ReqStorageMetadata
+	Cache                ReqCacheData
 	IsZipError           bool
 	IsResponseWriteError bool
 	IsCondError          bool
+	IsCacheLookupError   bool
 	Duration             ReqDuration
 	Coord                *tile.TileCoord
 	HttpData             HttpRequestData
@@ -145,17 +201,23 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	if reqState.IsCondError {
 		reqStateErrs["cond"] = true
 	}
+	if reqState.IsCacheLookupError {
+		reqStateErrs["cache_lookup"] = true
+	}
 	if len(reqStateErrs) > 0 {
 		result["error"] = reqStateErrs
 	}
 
 	result["timing"] = map[string]int64{
-		"parse":         reqState.Duration.Parse.Milliseconds(),
-		"storage_fetch": reqState.Duration.StorageFetch.Milliseconds(),
-		"storage_read":  reqState.Duration.StorageRead.Milliseconds(),
-		"metatile_find": reqState.Duration.MetatileFind.Milliseconds(),
-		"resp_write":    reqState.Duration.RespWrite.Milliseconds(),
-		"total":         reqState.Duration.Total.Milliseconds(),
+		"parse":                 reqState.Duration.Parse.Milliseconds(),
+		"vector_cache_lookup":   reqState.Duration.VectorCacheLookup.Milliseconds(),
+		"metatile_cache_lookup": reqState.Duration.MetatileCacheLookup.Milliseconds(),
+		"cache_set":             reqState.Duration.CacheSet.Milliseconds(),
+		"storage_fetch":         reqState.Duration.StorageFetch.Milliseconds(),
+		"storage_read":          reqState.Duration.StorageRead.Milliseconds(),
+		"metatile_find":         reqState.Duration.MetatileFind.Milliseconds(),
+		"resp_write":            reqState.Duration.RespWrite.Milliseconds(),
+		"total":                 reqState.Duration.Total.Milliseconds(),
 	}
 
 	httpJsonData := make(map[string]interface{})
@@ -187,6 +249,11 @@ func (reqState *RequestState) AsJsonMap() map[string]interface{} {
 	httpJsonData["status"] = reqState.ResponseState.AsStatusCode()
 	result["http"] = httpJsonData
 
+	cacheJsonData := make(map[string]interface{})
+	cacheJsonData["vector_hit"] = reqState.Cache.VectorCacheHit
+	cacheJsonData["metatile_hit"] = reqState.Cache.MetatileCacheHit
+	result["cache"] = cacheJsonData
+
 	return result
 }
 
@@ -196,7 +263,7 @@ type TileJsonDuration struct {
 
 type TileJsonRequestState struct {
 	Duration             TileJsonDuration
-	Format               *storage.TileJsonFormat
+	Format               *TileJsonFormat
 	ResponseState        ReqResponseState
 	FetchState           ReqFetchState
 	FetchSize            uint64
@@ -273,15 +340,59 @@ type ReqStorageMetadata struct {
 }
 
 type ReqDuration struct {
-	Parse, StorageFetch, StorageRead, MetatileFind, RespWrite, Total time.Duration
+	Parse               time.Duration
+	StorageFetch        time.Duration
+	VectorCacheLookup   time.Duration
+	MetatileCacheLookup time.Duration
+	StorageRead         time.Duration
+	MetatileFind        time.Duration
+	RespWrite           time.Duration
+	Total               time.Duration
+	CacheSet            time.Duration
 }
 
 // durations will be logged in milliseconds
 type JsonReqDuration struct {
 	Parse        int64
+	CacheLookup  int64
 	StorageFetch int64
 	StorageRead  int64
 	MetatileFind int64
 	RespWrite    int64
 	Total        int64
+}
+
+type TileJsonFormat int
+
+const (
+	TileJsonFormat_Mvt = iota
+	TileJsonFormat_Json
+	TileJsonFormat_Topojson
+)
+
+func (f *TileJsonFormat) Name() string {
+	switch *f {
+	case TileJsonFormat_Mvt:
+		return "mapbox"
+	case TileJsonFormat_Json:
+		return "geojson"
+	case TileJsonFormat_Topojson:
+		return "topojson"
+	}
+	panic(fmt.Sprintf("Unknown tilejson format: %d", int(*f)))
+}
+
+func NewTileJsonFormat(name string) *TileJsonFormat {
+	var format TileJsonFormat
+	switch name {
+	case "mapbox":
+		format = TileJsonFormat_Mvt
+	case "geojson":
+		format = TileJsonFormat_Json
+	case "topojson":
+		format = TileJsonFormat_Topojson
+	default:
+		return nil
+	}
+	return &format
 }

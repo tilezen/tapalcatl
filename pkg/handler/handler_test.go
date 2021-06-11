@@ -4,15 +4,16 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/tilezen/tapalcatl/pkg/buffer"
+	"github.com/tilezen/tapalcatl/pkg/cache"
 	"github.com/tilezen/tapalcatl/pkg/log"
 	"github.com/tilezen/tapalcatl/pkg/metrics"
+	"github.com/tilezen/tapalcatl/pkg/state"
 	"github.com/tilezen/tapalcatl/pkg/storage"
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
@@ -39,9 +40,9 @@ type fakeParser struct {
 	tile tile.TileCoord
 }
 
-func (f *fakeParser) Parse(_ *http.Request) (*ParseResult, error) {
-	result := &ParseResult{
-		AdditionalData: &MetatileParseData{Coord: f.tile},
+func (f *fakeParser) Parse(_ *http.Request) (*state.ParseResult, error) {
+	result := &state.ParseResult{
+		AdditionalData: &state.MetatileParseData{Coord: f.tile},
 		ContentType:    "application/json",
 	}
 	return result, nil
@@ -51,7 +52,7 @@ type fakeStorage struct {
 	storage map[tile.TileCoord]*storage.StorageResponse
 }
 
-func (f *fakeStorage) Fetch(t tile.TileCoord, _ storage.Condition, prefix string) (*storage.StorageResponse, error) {
+func (f *fakeStorage) Fetch(t tile.TileCoord, _ state.Condition, prefix string) (*storage.StorageResponse, error) {
 	resp, ok := f.storage[t]
 	if ok {
 		return resp, nil
@@ -64,7 +65,7 @@ func (f *fakeStorage) HealthCheck() error {
 	return nil
 }
 
-func (f *fakeStorage) TileJson(fmt storage.TileJsonFormat, c storage.Condition, prefix string) (*storage.StorageResponse, error) {
+func (f *fakeStorage) TileJson(fmt state.TileJsonFormat, c state.Condition, prefix string) (*storage.StorageResponse, error) {
 	return nil, nil
 }
 
@@ -85,24 +86,11 @@ func (f *fakeResponseWriter) WriteHeader(status int) {
 	f.status = status
 }
 
-type NilJsonLogger struct{}
-
-func (_ *NilJsonLogger) Log(_ map[string]interface{}, _ ...interface{})        {}
-func (_ *NilJsonLogger) Info(_ string, _ ...interface{})                       {}
-func (_ *NilJsonLogger) Warning(_ log.LogCategory, _ string, _ ...interface{}) {}
-func (_ *NilJsonLogger) Error(_ log.LogCategory, _ string, _ ...interface{})   {}
-func (_ *NilJsonLogger) Metrics(_ map[string]interface{})                      {}
-func (_ *NilJsonLogger) TileJson(_ map[string]interface{})                     {}
-func (_ *NilJsonLogger) ExpVars()                                              {}
-
 func TestHandlerMiss(t *testing.T) {
 	theTile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: theTile}
-	mimes := map[string]string{
-		"json": "application/json",
-	}
 	storage := &fakeStorage{storage: make(map[tile.TileCoord]*storage.StorageResponse)}
-	h := MetatileHandler(parser, 1, 1, 0, mimes, storage, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &NilJsonLogger{})
+	h := MetatileHandler(parser, 1, 1, 0, storage, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &log.NilJsonLogger{}, cache.NilCache)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{
@@ -120,9 +108,6 @@ func TestHandlerMiss(t *testing.T) {
 func TestHandlerHit(t *testing.T) {
 	theTile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "json"}
 	parser := &fakeParser{tile: theTile}
-	mimes := map[string]string{
-		"json": "application/json",
-	}
 	stg := &fakeStorage{storage: make(map[tile.TileCoord]*storage.StorageResponse)}
 
 	metatile := tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}
@@ -139,13 +124,13 @@ func TestHandlerHit(t *testing.T) {
 	}
 	stg.storage[metatile] = &storage.StorageResponse{
 		Response: &storage.SuccessfulResponse{
-			Body:         ioutil.NopCloser(bytes.NewReader(zipfile.Bytes())),
+			Body:         zipfile.Bytes(),
 			LastModified: &lastModified,
 			ETag:         &etag,
 		},
 	}
 
-	h := MetatileHandler(parser, 1, 1, 0, mimes, stg, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &NilJsonLogger{})
+	h := MetatileHandler(parser, 1, 1, 0, stg, &buffer.OnDemandBufferManager{}, &metrics.NilMetricsWriter{}, &log.NilJsonLogger{}, cache.NilCache)
 
 	rw := &fakeResponseWriter{header: make(http.Header), status: 0}
 	req := &http.Request{

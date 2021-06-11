@@ -2,9 +2,11 @@ package storage
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 
+	"github.com/tilezen/tapalcatl/pkg/state"
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
 
@@ -14,7 +16,7 @@ type FileStorage struct {
 	healthcheck string
 }
 
-func NewFileStorage(baseDir, layer string, healthcheck string) *FileStorage {
+func NewFileStorage(baseDir string, layer, healthcheck string) *FileStorage {
 	return &FileStorage{
 		baseDir:     baseDir,
 		layer:       layer,
@@ -23,7 +25,7 @@ func NewFileStorage(baseDir, layer string, healthcheck string) *FileStorage {
 }
 
 func respondWithPath(path string) (*StorageResponse, error) {
-	file, err := os.Open(path)
+	bytes, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			resp := &StorageResponse{
@@ -37,19 +39,19 @@ func respondWithPath(path string) (*StorageResponse, error) {
 	} else {
 		resp := &StorageResponse{
 			Response: &SuccessfulResponse{
-				Body: file,
+				Body: bytes,
 			},
 		}
 		return resp, nil
 	}
 }
 
-func (f *FileStorage) Fetch(t tile.TileCoord, c Condition, prefix string) (*StorageResponse, error) {
+func (f *FileStorage) Fetch(t tile.TileCoord, c state.Condition, prefix string) (*StorageResponse, error) {
 	tilepath := filepath.Join(f.baseDir, f.layer, filepath.FromSlash(t.FileName()))
 	return respondWithPath(tilepath)
 }
 
-func (s *FileStorage) TileJson(f TileJsonFormat, c Condition, prefix string) (*StorageResponse, error) {
+func (s *FileStorage) TileJson(f state.TileJsonFormat, c state.Condition, prefix string) (*StorageResponse, error) {
 	dirpath := "tilejson"
 	tileJsonExt := "json"
 	filename := fmt.Sprintf("%s.%s", f.Name(), tileJsonExt)

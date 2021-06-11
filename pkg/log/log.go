@@ -168,3 +168,13 @@ func NewJsonLogger(logger *log.Logger, hostname string) JsonLogger {
 		Hostname: hostname,
 	}
 }
+
+type NilJsonLogger struct{}
+
+func (_ *NilJsonLogger) Log(_ map[string]interface{}, _ ...interface{})    {}
+func (_ *NilJsonLogger) Info(_ string, _ ...interface{})                   {}
+func (_ *NilJsonLogger) Warning(_ LogCategory, _ string, _ ...interface{}) {}
+func (_ *NilJsonLogger) Error(_ LogCategory, _ string, _ ...interface{})   {}
+func (_ *NilJsonLogger) Metrics(_ map[string]interface{})                  {}
+func (_ *NilJsonLogger) TileJson(_ map[string]interface{})                 {}
+func (_ *NilJsonLogger) ExpVars()                                          {}

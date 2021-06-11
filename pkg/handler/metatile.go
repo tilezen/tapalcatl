@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/tilezen/tapalcatl/pkg/cache"
 
 	"github.com/tilezen/tapalcatl/pkg/buffer"
 	"github.com/tilezen/tapalcatl/pkg/log"
@@ -18,18 +20,29 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
 
+const (
+	// cacheTimeout is the amount of time to wait for tile cache to do it's job before timing out.
+	cacheTimeout = 20 * time.Millisecond
+	// cacheSetTimeout is the amount of time to wait for the cache when we're setting values.
+	// This is higher because we do this in a goroutine off the thread processing the response.
+	cacheSetTimeout = 1 * time.Second
+	// cacheMetatileTTL is the amount of time the cache should store metatiles before forcing a refresh
+	cacheMetatileTTL = 168 * time.Hour
+	// cacheVectorTileTTL is the amount of time the cache should store vector tiles before forcing a refresh
+	cacheVectorTileTTL = 168 * time.Hour
+)
+
 func MetatileHandler(
-	p Parser,
+	p state.Parser,
 	metatileSize, tileSize, metatileMaxDetailZoom int,
-	mimeMap map[string]string,
 	stg storage.Storage,
 	bufferManager buffer.BufferManager,
 	mw metrics.MetricsWriter,
-	logger log.JsonLogger) http.Handler {
+	logger log.JsonLogger,
+	tileCache cache.Cache) http.Handler {
 
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-
-		reqState := state.RequestState{}
+		reqState := &state.RequestState{}
 
 		startTime := time.Now()
 
@@ -38,14 +51,14 @@ func MetatileHandler(
 			reqState.Duration.Total = totalDuration
 
 			if reqState.ResponseState == state.ResponseState_Nil {
-				logger.Error(log.LogCategory_InvalidCodeState, "handler did not set response state")
+				logger.Error(log.LogCategory_InvalidCodeState, "handler did not set response state for tile %+v", reqState.Coord)
 			}
 
 			jsonReqData := reqState.AsJsonMap()
 			logger.Metrics(jsonReqData)
 
 			// write out metrics
-			mw.WriteMetatileState(&reqState)
+			mw.WriteMetatileState(reqState)
 
 		}()
 
@@ -86,11 +99,37 @@ func MetatileHandler(
 			}
 		}
 
-		metatileData := parseResult.AdditionalData.(*MetatileParseData)
+		metatileData := parseResult.AdditionalData.(*state.MetatileParseData)
 		reqState.Coord = &metatileData.Coord
 		reqState.Format = reqState.Coord.Format
 		reqState.HttpData = parseResult.HttpData
 
+		// Check for requested vector tile in cache before doing work to extract it from metatile
+		vecCacheLookupStart := time.Now()
+		timeoutCtx, cancel := context.WithTimeout(req.Context(), cacheTimeout)
+		cachedVecResp, err := tileCache.GetTile(timeoutCtx, parseResult)
+		cancel()
+		reqState.Duration.VectorCacheLookup = time.Since(vecCacheLookupStart)
+		if err != nil {
+			reqState.IsCacheLookupError = true
+			logger.Warning(log.LogCategory_ResponseError, "Error checking vector cache: %+v", err)
+		}
+
+		if cachedVecResp != nil {
+			err := writeVectorTileResponse(reqState, rw, cachedVecResp)
+			if err != nil {
+				logger.Error(log.LogCategory_ResponseError, "Failed to write cachedVecResp response body: %#v", err)
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				reqState.ResponseState = state.ResponseState_Error
+				return
+			}
+
+			reqState.Cache.VectorCacheHit = true
+			reqState.ResponseState = state.ResponseState_Success
+			return
+		}
+
+		// Get the offset coordinate inside the metatile where we should be able to find the vector tile
 		metaCoord, offset, err := metatileData.Coord.MetaAndOffset(metatileSize, tileSize, metatileMaxDetailZoom)
 		if err != nil {
 			logger.Warning(log.LogCategory_ConfigError, "MetaAndOffset could not be calculated: %s", err.Error())
@@ -100,120 +139,227 @@ func MetatileHandler(
 			return
 		}
 
-		storageFetchStart := time.Now()
-		storageResult, err := stg.Fetch(metaCoord, parseResult.Cond, parseResult.BuildID)
-		reqState.Duration.StorageFetch = time.Since(storageFetchStart)
+		var metatileResponseData *state.MetatileResponseData
 
-		if err != nil || storageResult.NotFound {
-			if err != nil {
-				logger.Warning(log.LogCategory_StorageError, "Metatile storage fetch failure: %#v", err)
-				http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
-				reqState.FetchState = state.FetchState_FetchError
-				reqState.ResponseState = state.ResponseState_Error
-			} else {
-				http.NotFound(rw, req)
-				reqState.FetchState = state.FetchState_NotFound
-				reqState.ResponseState = state.ResponseState_NotFound
-			}
-			return
+		// Check for the desired metatile in cache before taking the time to fetch it from storage
+		metaCacheLookupStart := time.Now()
+		timeoutCtx, cancel = context.WithTimeout(req.Context(), cacheTimeout)
+		metatileResponseData, err = tileCache.GetMetatile(timeoutCtx, parseResult, metaCoord)
+		cancel()
+		reqState.Duration.MetatileCacheLookup = time.Since(metaCacheLookupStart)
+		if err != nil {
+			reqState.IsCacheLookupError = true
+			logger.Warning(log.LogCategory_ResponseError, "Error checking metatile cache: %+v", err)
 		}
 
-		reqState.FetchState = state.FetchState_Success
+		if metatileResponseData == nil {
+			metatileResponseData, err = fetchMetatile(reqState, stg, parseResult, metaCoord)
+			if err != nil {
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				reqState.ResponseState = state.ResponseState_Error
+				return
+			}
 
-		if storageResult.NotModified {
+			// Set the metatile cache on a goroutine so we don't hold up the rest of the request
+			go func() {
+				timeoutCtx, cancel := context.WithTimeout(context.Background(), cacheSetTimeout)
+				err = tileCache.SetMetatile(timeoutCtx, parseResult, metaCoord, metatileResponseData, cacheMetatileTTL)
+				cancel()
+				if err != nil {
+					logger.Warning(log.LogCategory_ResponseError, "Failed to set metatile cache: %+v", err)
+				}
+			}()
+		} else {
+			reqState.Cache.MetatileCacheHit = true
+		}
+
+		metatileResponseData.Offset = offset
+
+		if metatileResponseData.ResponseState == state.ResponseState_NotFound {
+			http.NotFound(rw, req)
+			reqState.ResponseState = state.ResponseState_NotFound
+			return
+		} else if metatileResponseData.ResponseState == state.ResponseState_NotModified {
 			rw.WriteHeader(http.StatusNotModified)
 			reqState.ResponseState = state.ResponseState_NotModified
 			return
 		}
 
-		storageResp := storageResult.Response
-
-		// ensure that now we have a body to read, it always gets closed
-		defer storageResp.Body.Close()
-
-		// grab a buffer used to store the response in memory
-		buf := bufferManager.Get()
-		defer bufferManager.Put(buf)
-
-		// metatile reader needs to be able to seek in the buffer and know
-		// its size. the easiest way to ensure that is to buffer the whole
-		// thing into memory.
-		storageReadStart := time.Now()
-		bodySize, err := io.Copy(buf, storageResp.Body)
-		reqState.Duration.StorageRead = time.Since(storageReadStart)
+		responseData, err := extractVectorTileFromMetatile(reqState, bufferManager, parseResult, metatileResponseData)
 		if err != nil {
-			logger.Error(log.LogCategory_StorageError, "Failed to read storage body: %#v", err)
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
-			reqState.FetchState = state.FetchState_ReadError
 			reqState.ResponseState = state.ResponseState_Error
 			return
 		}
-		reqState.FetchState = state.FetchState_Success
 
-		storageBytes := buf.Bytes()
-		reqState.FetchSize.BodySize = bodySize
-		reqState.FetchSize.BytesLength = int64(len(storageBytes))
-		reqState.FetchSize.BytesCap = int64(cap(storageBytes))
+		// Copy some of the metatile response data over to the vector tile response data so that it is properly cachedVecResp
+		responseData.ETag = metatileResponseData.ETag
+		responseData.LastModified = metatileResponseData.LastModified
 
-		headers := rw.Header()
-		headers.Set("Content-Type", parseResult.ContentType)
-		if lastMod := storageResp.LastModified; lastMod != nil {
-			// important! we must format times in an HTTP-compliant way, which
-			// apparently doesn't match any existing Go time format string, so the
-			// recommended way is to switch to UTC and use the format string that
-			// the net/http package exposes.
-			lastModifiedFormatted := lastMod.UTC().Format(http.TimeFormat)
-			headers.Set("Last-Modified", lastModifiedFormatted)
-			reqState.StorageMetadata.HasLastModified = true
-		}
-		if etag := storageResp.ETag; etag != nil {
-			headers.Set("ETag", *etag)
-			reqState.StorageMetadata.HasEtag = true
-		}
-
-		metatileReaderFindStart := time.Now()
-		reader, formatSize, err := tile.NewMetatileReader(offset, bytes.NewReader(storageBytes), bodySize)
-		reqState.Duration.MetatileFind = time.Since(metatileReaderFindStart)
+		err = writeVectorTileResponse(reqState, rw, responseData)
 		if err != nil {
-			logger.Error(log.LogCategory_MetatileError, "Failed to read metatile: %#v", err)
-			http.Error(rw, err.Error(), http.StatusInternalServerError)
-			reqState.IsZipError = true
-			reqState.ResponseState = state.ResponseState_Error
-			return
-		}
-		// make sure to close zip file reader
-		defer reader.Close()
-		reqState.ResponseSize = int(formatSize)
-		headers.Set("Content-Length", fmt.Sprintf("%d", formatSize))
-
-		rw.WriteHeader(http.StatusOK)
-		reqState.ResponseState = state.ResponseState_Success
-		respWriteStart := time.Now()
-		_, err = io.Copy(rw, reader)
-		reqState.Duration.RespWrite = time.Since(respWriteStart)
-		if err != nil {
+			// TODO Context cancellation might happen here?
 			logger.Error(log.LogCategory_ResponseError, "Failed to write response body: %#v", err)
-			reqState.IsResponseWriteError = true
+			// Still want to set the cache in this case
 		}
+
+		// Cache the response
+		go func() {
+			// Using a longer timeout here so that there's a better chance the set will complete
+			timeoutCtx, cancel = context.WithTimeout(context.Background(), cacheSetTimeout)
+			err = tileCache.SetTile(timeoutCtx, parseResult, responseData, cacheVectorTileTTL)
+			cancel()
+			if err != nil {
+				logger.Error(log.LogCategory_ResponseError, "Failed to set cache: %#v", err)
+			}
+		}()
 	})
+}
+
+func fetchMetatile(reqState *state.RequestState, stg storage.Storage, parseResult *state.ParseResult, metaCoord tile.TileCoord) (*state.MetatileResponseData, error) {
+	responseData := &state.MetatileResponseData{}
+
+	// Fetch the metatile zip file from storage
+	storageFetchStart := time.Now()
+	storageResult, err := stg.Fetch(metaCoord, parseResult.Cond, parseResult.BuildID)
+	reqState.Duration.StorageFetch = time.Since(storageFetchStart)
+
+	if err != nil || storageResult.NotFound {
+		if err != nil {
+			reqState.FetchState = state.FetchState_FetchError
+			reqState.ResponseState = state.ResponseState_Error
+			responseData.ResponseState = state.ResponseState_Error
+			return responseData, fmt.Errorf("metatile storage fetch failure: %w", err)
+		}
+
+		reqState.FetchState = state.FetchState_NotFound
+		reqState.ResponseState = state.ResponseState_NotFound
+		responseData.ResponseState = state.ResponseState_NotFound
+		return responseData, nil
+	}
+
+	reqState.FetchState = state.FetchState_Success
+
+	if storageResult.NotModified {
+		reqState.ResponseState = state.ResponseState_NotModified
+		responseData.ResponseState = state.ResponseState_NotModified
+		return responseData, nil
+	}
+
+	// Copy the last-modified and etag headers from the metatile over to the vector tile
+	if lastMod := storageResult.Response.LastModified; lastMod != nil {
+		responseData.LastModified = lastMod
+		reqState.StorageMetadata.HasLastModified = true
+	}
+
+	if etag := storageResult.Response.ETag; etag != nil {
+		responseData.ETag = etag
+		reqState.StorageMetadata.HasLastModified = true
+	}
+
+	storageResp := storageResult.Response
+	reqState.FetchState = state.FetchState_Success
+
+	storageBytes := storageResp.Body
+	reqState.FetchSize.BodySize = int64(storageResp.Size)
+	reqState.FetchSize.BytesLength = int64(len(storageBytes))
+	reqState.FetchSize.BytesCap = int64(cap(storageBytes))
+
+	responseData.Data = storageBytes
+	responseData.BodySize = int64(len(storageBytes))
+
+	return responseData, nil
+}
+
+func extractVectorTileFromMetatile(reqState *state.RequestState, bufferManager buffer.BufferManager, parseResult *state.ParseResult, data *state.MetatileResponseData) (*state.VectorTileResponseData, error) {
+	responseData := &state.VectorTileResponseData{}
+	responseData.ContentType = parseResult.ContentType
+
+	// Set up the metatile reader to read the vector tile out of the metatile
+	metatileReaderFindStart := time.Now()
+	reader, formatSize, err := tile.NewMetatileReader(data.Offset, bytes.NewReader(data.Data), data.BodySize)
+	reqState.Duration.MetatileFind = time.Since(metatileReaderFindStart)
+	if err != nil {
+		reqState.IsZipError = true
+		reqState.ResponseState = state.ResponseState_Error
+		responseData.ResponseState = state.ResponseState_Error
+		return responseData, fmt.Errorf("failed to read metatile: %w", err)
+	}
+
+	// Copy the bytes of the vector tile from the metatile into another buffer
+	tileBuf := bufferManager.Get()
+	defer bufferManager.Put(tileBuf)
+	_, err = io.Copy(tileBuf, reader)
+	if err != nil {
+		reqState.IsZipError = true
+		reqState.ResponseState = state.ResponseState_Error
+		responseData.ResponseState = state.ResponseState_Error
+		return responseData, fmt.Errorf("failed to read tile out of metatile: %w", err)
+	}
+
+	err = reader.Close()
+	if err != nil {
+		reqState.IsZipError = true
+		reqState.ResponseState = state.ResponseState_Error
+		responseData.ResponseState = state.ResponseState_Error
+		return responseData, fmt.Errorf("failed to close vector tile reader: %w", err)
+	}
+
+	reqState.ResponseSize = int(formatSize)
+	responseData.Data = tileBuf.Bytes()
+
+	return responseData, nil
+}
+
+func writeVectorTileResponse(reqState *state.RequestState, rw http.ResponseWriter, vectorData *state.VectorTileResponseData) error {
+	headers := rw.Header()
+
+	headers.Set("Content-Type", vectorData.ContentType)
+	headers.Set("Content-Length", fmt.Sprintf("%d", len(vectorData.Data)))
+
+	if lastMod := vectorData.LastModified; lastMod != nil {
+		// It's important to write the last-modified header in an HTTP-compliant way.
+		// Go exposes http.TimeFormat for that, but hard-codes "GMT" at the end, though,
+		// so we need to make sure we convert the time to UTC before formatting.
+		lastModifiedFormatted := lastMod.UTC().Format(http.TimeFormat)
+		headers.Set("Last-Modified", lastModifiedFormatted)
+		reqState.StorageMetadata.HasLastModified = true
+	}
+
+	if etag := vectorData.ETag; etag != nil {
+		headers.Set("ETag", *etag)
+		reqState.StorageMetadata.HasEtag = true
+	}
+
+	rw.WriteHeader(http.StatusOK)
+	reqState.ResponseState = state.ResponseState_Success
+	respWriteStart := time.Now()
+	_, err := rw.Write(vectorData.Data)
+	reqState.Duration.RespWrite = time.Since(respWriteStart)
+	if err != nil {
+		reqState.IsResponseWriteError = true
+		return fmt.Errorf("failed to write response body: %w", err)
+	}
+
+	return nil
 }
 
 type MetatileMuxParser struct {
 	MimeMap map[string]string
 }
 
-func (mp *MetatileMuxParser) Parse(req *http.Request) (*ParseResult, error) {
+func (mp *MetatileMuxParser) Parse(req *http.Request) (*state.ParseResult, error) {
 	m := mux.Vars(req)
 
 	var contentType string
 	var err error
 	var ok bool
 
-	parseResult := &ParseResult{
-		Type:     ParseResultType_Metatile,
+	parseResult := &state.ParseResult{
+		Type:     state.ParseResultType_Metatile,
 		HttpData: ParseHttpData(req),
 	}
-	metatileData := &MetatileParseData{}
+	metatileData := &state.MetatileParseData{}
 	parseResult.AdditionalData = metatileData
 
 	fmt := m["fmt"]
@@ -261,8 +407,4 @@ func (mp *MetatileMuxParser) Parse(req *http.Request) (*ParseResult, error) {
 	}
 
 	return parseResult, nil
-}
-
-type MetatileParseData struct {
-	Coord tile.TileCoord
 }

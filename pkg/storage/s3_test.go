@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/tilezen/tapalcatl/pkg/state"
 
 	"github.com/tilezen/tapalcatl/pkg/tile"
 )
@@ -57,7 +58,7 @@ func TestS3StorageEmpty(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
-	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{}, "actualprefix")
+	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, state.Condition{}, "actualprefix")
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
@@ -89,7 +90,7 @@ func TestS3Storage(t *testing.T) {
 		t.Fatalf("Unexpected key calculation. Expected %#v, got %#v.", api.expectedKey, key)
 	}
 
-	resp, err := storage.Fetch(tile, Condition{}, "prefix")
+	resp, err := storage.Fetch(tile, state.Condition{}, "prefix")
 	if err != nil {
 		t.Fatalf("Unable to Get tile from Mock S3: %s", err.Error())
 	}
@@ -160,12 +161,10 @@ func TestS3StorageNullBody(t *testing.T) {
 
 	storage := NewS3Storage(api, bucket, keyPattern, prefix, layer, healthcheck)
 
-	resp, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, Condition{}, "actualprefix")
+	_, err := storage.Fetch(tile.TileCoord{Z: 0, X: 0, Y: 0, Format: "zip"}, state.Condition{}, "actualprefix")
 	if err != nil {
 		t.Fatalf("Unable to Get tile from null body S3: %s", err.Error())
 	}
-	// ensure that we can close the body safely in this case too
-	resp.Response.Body.Close()
 
 	// should be able to healthcheck as well
 	err = storage.HealthCheck()

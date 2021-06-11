@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/tilezen/tapalcatl/pkg/storage"
 )
 
-func TileJsonHandler(p Parser, stg storage.Storage, mw metrics.MetricsWriter, logger log.JsonLogger) http.Handler {
+func TileJsonHandler(p state.Parser, stg storage.Storage, mw metrics.MetricsWriter, logger log.JsonLogger) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		tileJsonReqState := state.TileJsonRequestState{}
 
@@ -81,8 +80,6 @@ func TileJsonHandler(p Parser, stg storage.Storage, mw metrics.MetricsWriter, lo
 		}
 		storageResp := storageResult.Response
 
-		defer storageResp.Body.Close()
-
 		headers := rw.Header()
 		headers.Set("Content-Type", parseResult.ContentType)
 		headers.Set("Content-Length", fmt.Sprintf("%d", storageResp.Size))
@@ -100,7 +97,7 @@ func TileJsonHandler(p Parser, stg storage.Storage, mw metrics.MetricsWriter, lo
 		rw.WriteHeader(http.StatusOK)
 		tileJsonReqState.ResponseState = state.ResponseState_Success
 		storageReadRespWriteStart := time.Now()
-		_, err = io.Copy(rw, storageResp.Body)
+		_, err = rw.Write(storageResp.Body)
 		tileJsonReqState.Duration.StorageReadRespWrite = time.Since(storageReadRespWriteStart)
 		if err != nil {
 			logger.Error(log.LogCategory_ResponseError, "Failed to write response body: %#v", err)
@@ -110,20 +107,20 @@ func TileJsonHandler(p Parser, stg storage.Storage, mw metrics.MetricsWriter, lo
 }
 
 type TileJsonParseData struct {
-	Format storage.TileJsonFormat
+	Format state.TileJsonFormat
 }
 
 type TileJsonParser struct{}
 
-func (tp *TileJsonParser) Parse(req *http.Request) (*ParseResult, error) {
-	parseResult := &ParseResult{
-		Type:        ParseResultType_Tilejson,
+func (tp *TileJsonParser) Parse(req *http.Request) (*state.ParseResult, error) {
+	parseResult := &state.ParseResult{
+		Type:        state.ParseResultType_Tilejson,
 		ContentType: "application/json",
 		HttpData:    ParseHttpData(req),
 	}
 	m := mux.Vars(req)
 	formatName := m["fmt"]
-	tileJsonFormat := storage.NewTileJsonFormat(formatName)
+	tileJsonFormat := state.NewTileJsonFormat(formatName)
 	if tileJsonFormat == nil {
 		return parseResult, &TileJsonParseError{
 			InvalidFormat: &formatName,

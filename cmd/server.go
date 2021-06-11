@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/namsral/flag"
@@ -25,6 +26,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/tilezen/tapalcatl/pkg/buffer"
+	"github.com/tilezen/tapalcatl/pkg/cache"
 	"github.com/tilezen/tapalcatl/pkg/config"
 	"github.com/tilezen/tapalcatl/pkg/handler"
 	"github.com/tilezen/tapalcatl/pkg/log"
@@ -44,6 +46,7 @@ func main() {
 	var listen, healthcheck, readyCheck string
 	var poolNumEntries, poolEntrySize int
 	var metricsStatsdAddr, metricsStatsdPrefix string
+	var redisAddr string
 
 	hc := config.HandlerConfig{}
 
@@ -104,6 +107,8 @@ func main() {
 	f.StringVar(&metricsStatsdAddr, "metrics-statsd-addr", "", "host:port to use to send data to statsd")
 	f.StringVar(&metricsStatsdPrefix, "metrics-statsd-prefix", "", "prefix to prepend to metrics")
 
+	f.StringVar(&redisAddr, "redis-addr", "", "Redis connection address for caching purposes")
+
 	err = f.Parse(os.Args[1:])
 	if err == flag.ErrHelp {
 		return
@@ -127,6 +132,26 @@ func main() {
 		bufferManager = bpool.NewSizedBufferPool(poolNumEntries, poolEntrySize)
 	} else {
 		bufferManager = &buffer.OnDemandBufferManager{}
+	}
+
+	var tileCache cache.Cache
+	if redisAddr != "" {
+		client := redis.NewClient(&redis.Options{
+			Addr: redisAddr,
+		})
+
+		// Ping Redis to make sure it's available before starting.
+		// Using a longer timeout to give time for network connections to spin up, etc.
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+		if err := client.Ping(timeoutCtx).Err(); err != nil {
+			logFatalCfgErr(logger, "Couldn't reach Redis service at %s: %s", redisAddr, err.Error())
+		}
+
+		logger.Info("Redis connected to %s", redisAddr)
+		tileCache = cache.NewRedisCache(client)
+	} else {
+		tileCache = cache.NilCache
 	}
 
 	// metrics writer configuration
@@ -208,10 +233,13 @@ func main() {
 			if awsSession == nil {
 				if hc.Aws != nil && hc.Aws.Region != nil {
 					awsSession, err = session.NewSessionWithOptions(session.Options{
-						Config: aws.Config{Region: hc.Aws.Region},
+						Config:            aws.Config{Region: hc.Aws.Region},
+						SharedConfigState: session.SharedConfigEnable,
 					})
 				} else {
-					awsSession, err = session.NewSession()
+					awsSession, err = session.NewSessionWithOptions(session.Options{
+						SharedConfigState: session.SharedConfigEnable,
+					})
 				}
 			}
 			if err != nil {
@@ -282,7 +310,7 @@ func main() {
 				MimeMap: hc.Mime,
 			}
 
-			h := handler.MetatileHandler(parser, metatileSize, tileSize, metatileMaxDetailZoom, hc.Mime, stg, bufferManager, mw, logger)
+			h := handler.MetatileHandler(parser, metatileSize, tileSize, metatileMaxDetailZoom, stg, bufferManager, mw, logger, tileCache)
 			gzipped := gziphandler.GzipHandler(h)
 
 			r.Handle(reqPattern, gzipped).Methods("GET")
