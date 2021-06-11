@@ -21,8 +21,7 @@ type SuccessfulResponse struct {
 }
 
 type StorageResponse struct {
-	Response      *SuccessfulResponse
-	NotModified   bool
-	NotFound      bool
-	FetchCacheHit bool
+	Response    *SuccessfulResponse
+	NotModified bool
+	NotFound    bool
 }

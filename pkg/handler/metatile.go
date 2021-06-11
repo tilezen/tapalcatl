@@ -155,6 +155,18 @@ func MetatileHandler(
 				reqState.ResponseState = state.ResponseState_Error
 				return
 			}
+
+			// Set the metatile cache on a goroutine so we don't hold up the rest of the request
+			go func() {
+				timeoutCtx, cancel := context.WithTimeout(context.Background(), cacheSetTimeout)
+				err = tileCache.SetMetatile(timeoutCtx, parseResult, metaCoord, metatileResponseData)
+				cancel()
+				if err != nil {
+					logger.Warning(log.LogCategory_ResponseError, "Failed to set metatile cache: %+v", err)
+				}
+			}()
+		} else {
+			reqState.Cache.MetatileCacheHit = true
 		}
 
 		metatileResponseData.Offset = offset
@@ -222,7 +234,6 @@ func fetchMetatile(reqState *state.RequestState, stg storage.Storage, parseResul
 		return responseData, nil
 	}
 
-	reqState.Cache.MetatileCacheHit = storageResult.FetchCacheHit
 	reqState.FetchState = state.FetchState_Success
 
 	if storageResult.NotModified {

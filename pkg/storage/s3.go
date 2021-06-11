@@ -86,14 +86,12 @@ func (s *S3Storage) respondWithKey(key string, c state.Condition) (*StorageRespo
 			switch awsErr.Code() {
 			case "NoSuchKey":
 				result = &StorageResponse{
-					NotFound:      true,
-					FetchCacheHit: false,
+					NotFound: true,
 				}
 				return result, nil
 			case "NotModified":
 				result = &StorageResponse{
-					NotModified:   true,
-					FetchCacheHit: false,
+					NotModified: true,
 				}
 				return result, nil
 			default:
@@ -121,7 +119,6 @@ func (s *S3Storage) respondWithKey(key string, c state.Condition) (*StorageRespo
 	}
 
 	result = &StorageResponse{
-		FetchCacheHit: false,
 		Response: &SuccessfulResponse{
 			Body:         body,
 			LastModified: output.LastModified,
