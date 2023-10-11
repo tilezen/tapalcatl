@@ -12,5 +12,5 @@ require (
 	github.com/namsral/flag v1.7.4-pre
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c
 	github.com/vmihailenco/msgpack/v5 v5.3.4
-	golang.org/x/net v0.7.0
+	golang.org/x/net v0.17.0
 )
